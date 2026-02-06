@@ -7,7 +7,7 @@ import BoundaryFrame from '@/components/ui/BoundaryFrame'
 import { COLORS } from '@/lib/constants'
 
 // ============================================
-// 1. GLOBAL CONSTANTS
+// 1. GLOBAL CONSTANTS (Top Level)
 // ============================================
 
 const FONTS = {
@@ -51,11 +51,12 @@ const VISIBLE_CARDS_DESKTOP = 6
 const MOBILE_CARD_W = 220
 const MOBILE_CARD_H = 320
 
-// ANIMATION TIMINGS (Strictly defined for smooth rhythm)
+// ANIMATION TIMINGS
 const PAUSE_DURATION = 1.0 
-const MOBILE_FLY_DURATION = 0.5 // Faster "Slam" feel
-const MOBILE_BOUNCE_DURATION = 0.2 // Recoil time
 const SHIFT_DURATION = 0.5 
+// Mobile specific timings
+const MOBILE_ARC_DURATION = 0.7 
+const MOBILE_INTERVAL = 0.2 // Short pause between deals
 
 const CARD_OVERLAYS = [
   'rgba(229, 9, 20, 0.12)', 'rgba(178, 7, 16, 0.15)', 'rgba(113, 121, 126, 0.12)',
@@ -68,7 +69,6 @@ const CARD_OVERLAYS = [
 
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(false)
-  
   useLayoutEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768)
     check()
@@ -83,36 +83,29 @@ function useIsMobile() {
       clearTimeout(timeoutId)
     }
   }, [])
-  
   return isMobile
 }
 
-// Robust preloader that returns a "ready" state
 function useImagePreloader(images: string[]) {
-  const [isLoaded, setIsLoaded] = useState(false)
-
+  const [isReady, setIsReady] = useState(false)
   useEffect(() => {
-    let loadedCount = 0
-    const totalToLoad = 6 // Only block for the first 6
-    
-    const checkDone = () => {
-      loadedCount++
-      if (loadedCount >= totalToLoad) setIsLoaded(true)
+    let count = 0
+    const target = 6
+    const check = () => {
+      count++
+      if (count >= target) setIsReady(true)
     }
-
-    images.slice(0, totalToLoad).forEach((src) => {
+    images.slice(0, target).forEach((src) => {
       const img = new Image()
       img.src = src
-      if (img.complete) {
-        checkDone()
-      } else {
-        img.onload = checkDone
-        img.onerror = checkDone
+      if (img.complete) check()
+      else {
+        img.onload = check
+        img.onerror = check
       }
     })
   }, [images])
-
-  return isLoaded
+  return isReady
 }
 
 // ============================================
@@ -120,7 +113,7 @@ function useImagePreloader(images: string[]) {
 // ============================================
 
 const CardImageContent = React.memo(({ imageUrl, overlayColor, isMobile = false }: { imageUrl?: string, overlayColor?: string, isMobile?: boolean }) => {
-  const safeSrc = imageUrl && imageUrl.length > 0 ? imageUrl : ALL_IMAGES[0]
+  const safeSrc = imageUrl || ALL_IMAGES[0]
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', transformStyle: 'preserve-3d' }}>
@@ -129,7 +122,7 @@ const CardImageContent = React.memo(({ imageUrl, overlayColor, isMobile = false 
         inset: isMobile ? '6px' : '0',
         borderRadius: '12px',
         backgroundColor: '#000',
-        boxShadow: isMobile ? `0 4px 10px rgba(0,0,0,0.6)` : '0 8px 16px rgba(0,0,0,0.4)',
+        boxShadow: isMobile ? `0 10px 30px rgba(0,0,0,0.6)` : '0 8px 16px rgba(0,0,0,0.4)',
         opacity: 1,
         transform: 'translateZ(-1px)',
         transition: 'box-shadow 0.4s ease'
@@ -160,143 +153,146 @@ CardImageContent.displayName = 'CardImageContent'
 
 
 // ============================================
-// 4. MOBILE CAROUSEL ("The Card Slam")
+// 4. MOBILE CAROUSEL ("Gravity Arc Deal")
 // ============================================
 
 const MobileCarouselGSAP = ({ isReady }: { isReady: boolean }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   
-  // Minimal DOM Nodes: Center Pile + 2 Active Flyers
+  // Minimal DOM: Center + 2 Flyers (Left/Right)
   const centerPileRef = useRef<HTMLDivElement>(null)
-  const leftSourceRef = useRef<HTMLDivElement>(null)
-  const rightSourceRef = useRef<HTMLDivElement>(null)
   const leftFlyerRef = useRef<HTMLDivElement>(null)
   const rightFlyerRef = useRef<HTMLDivElement>(null)
   
   const stateRef = useRef({
-    leftIdx: 2,
-    rightIdx: 3,
-    centerIdx: 0,
-    nextIdx: 4
+    currentIdx: 0,
+    nextIdx: 1,
+    zIndex: 100
   })
 
   useLayoutEffect(() => {
-    if (!isReady) return // Wait for images to load before animating
+    if (!isReady) return
 
     const ctx = gsap.context(() => {
         
-        // 1. SETUP IMAGES
-        const updateAllImages = () => {
-            const { leftIdx, rightIdx, centerIdx } = stateRef.current
-            if(leftSourceRef.current) (leftSourceRef.current.querySelector('.content-img') as HTMLImageElement).src = ALL_IMAGES[leftIdx % ALL_IMAGES.length]
-            if(rightSourceRef.current) (rightSourceRef.current.querySelector('.content-img') as HTMLImageElement).src = ALL_IMAGES[rightIdx % ALL_IMAGES.length]
-            if(centerPileRef.current) (centerPileRef.current.querySelector('.content-img') as HTMLImageElement).src = ALL_IMAGES[centerIdx % ALL_IMAGES.length]
-        }
-        updateAllImages()
+        // 1. SETUP
+        if(centerPileRef.current) (centerPileRef.current.querySelector('.content-img') as HTMLImageElement).src = ALL_IMAGES[0]
+        
+        // Hide Flyers
+        gsap.set([leftFlyerRef.current, rightFlyerRef.current], { display: 'none' })
+        
+        stateRef.current.nextIdx = 1
 
-        // 2. TIMELINE: The Slam Pattern
+        // 2. TIMELINE: The Gravity Arc
         const tl = gsap.timeline({ repeat: -1 })
 
-        // === LEFT SLAM ===
-        tl.to({}, { duration: 0.1 }) // Tiny breath
-          .call(() => {
-             // Prepare Left Flyer
-             const { leftIdx, nextIdx } = stateRef.current
+        // --- SEQUENCE A: LEFT ARC (Falls from Top-Left) ---
+        tl.call(() => {
+             const { nextIdx, zIndex } = stateRef.current
              const flyer = leftFlyerRef.current
              if(flyer) {
-                 (flyer.querySelector('.content-img') as HTMLImageElement).src = ALL_IMAGES[leftIdx % ALL_IMAGES.length]
-                 // Start tilted left
-                 gsap.set(flyer, { display: 'block', x: -180, rotation: -12, scale: 0.9, zIndex: 50, opacity: 1 })
+                 (flyer.querySelector('.content-img') as HTMLImageElement).src = ALL_IMAGES[nextIdx % ALL_IMAGES.length]
+                 
+                 // START: Top Left, Tilted
+                 gsap.set(flyer, { 
+                     display: 'block', 
+                     x: -180, 
+                     y: -200, // High up
+                     rotation: -35, // Tilted left
+                     scale: 0.8,
+                     opacity: 0,
+                     zIndex: zIndex 
+                 })
              }
-             // Update Source immediately (Illusion)
-             if(leftSourceRef.current) {
-                 (leftSourceRef.current.querySelector('.content-img') as HTMLImageElement).src = ALL_IMAGES[nextIdx % ALL_IMAGES.length]
-                 // Tiny source recoil
-                 gsap.fromTo(leftSourceRef.current, { x: -175 }, { x: -180, duration: 0.3, ease: "power2.out" })
-             }
-             stateRef.current.leftIdx = nextIdx
-             stateRef.current.nextIdx++
+             stateRef.current.zIndex++
           })
+          // The Arc Motion
+          .to(leftFlyerRef.current, {
+             opacity: 1, duration: 0.2
+          }, "leftArc") // Fade in quickly
           .to(leftFlyerRef.current, {
              x: 0,
-             rotation: 0,
+             duration: MOBILE_ARC_DURATION,
+             ease: "power2.out" // Decelerate horizontally
+          }, "leftArc")
+          .to(leftFlyerRef.current, {
+             y: 0,
+             duration: MOBILE_ARC_DURATION,
+             ease: "bounce.out" // Gravity bounce vertically
+          }, "leftArc")
+          .to(leftFlyerRef.current, {
+             rotation: (Math.random() * 4) - 2, // Land straight
              scale: 1,
-             duration: MOBILE_FLY_DURATION,
-             ease: "power2.in" // Accelerate into the slam
-          })
-          // IMPACT MOMENT
-          .to(centerPileRef.current, { 
-             scale: 0.95, 
-             duration: 0.1, 
-             ease: "power1.in" 
-          }, "<0.4") // Start shrinking just before impact
+             duration: MOBILE_ARC_DURATION,
+             ease: "power1.out"
+          }, "leftArc")
+          
           .call(() => {
-             // Swap Center Image
-             const { centerIdx } = stateRef.current
-             // The old left index is now the center
-             // (We need to track previous indices better in a real app, but for visual flow:)
-             // Actually, we grab the src from the flyer
-             const flyerSrc = (leftFlyerRef.current?.querySelector('.content-img') as HTMLImageElement)?.src
-             if(centerPileRef.current && flyerSrc) (centerPileRef.current.querySelector('.content-img') as HTMLImageElement).src = flyerSrc
-             
-             // Hide Flyer
+             // Commit
+             const src = (leftFlyerRef.current?.querySelector('.content-img') as HTMLImageElement)?.src
+             if(centerPileRef.current && src) (centerPileRef.current.querySelector('.content-img') as HTMLImageElement).src = src
              gsap.set(leftFlyerRef.current, { display: 'none' })
-          })
-          .to(centerPileRef.current, {
-             scale: 1.0,
-             duration: MOBILE_BOUNCE_DURATION,
-             ease: "back.out(3)" // Big bounce back
-          })
-          .to({}, { duration: 0.5 }) // Wait before next card
-
-
-        // === RIGHT SLAM ===
-        .call(() => {
-             // Prepare Right Flyer
-             const { rightIdx, nextIdx } = stateRef.current
-             const flyer = rightFlyerRef.current
-             if(flyer) {
-                 (flyer.querySelector('.content-img') as HTMLImageElement).src = ALL_IMAGES[rightIdx % ALL_IMAGES.length]
-                 gsap.set(flyer, { display: 'block', x: 180, rotation: 12, scale: 0.9, zIndex: 50, opacity: 1 })
-             }
-             // Update Source
-             if(rightSourceRef.current) {
-                 (rightSourceRef.current.querySelector('.content-img') as HTMLImageElement).src = ALL_IMAGES[nextIdx % ALL_IMAGES.length]
-                 gsap.fromTo(rightSourceRef.current, { x: 175 }, { x: 180, duration: 0.3, ease: "power2.out" })
-             }
-             stateRef.current.rightIdx = nextIdx
              stateRef.current.nextIdx++
           })
+          
+          .to({}, { duration: MOBILE_INTERVAL })
+
+
+        // --- SEQUENCE B: RIGHT ARC (Falls from Top-Right) ---
+        .call(() => {
+             const { nextIdx, zIndex } = stateRef.current
+             const flyer = rightFlyerRef.current
+             if(flyer) {
+                 (flyer.querySelector('.content-img') as HTMLImageElement).src = ALL_IMAGES[nextIdx % ALL_IMAGES.length]
+                 
+                 // START: Top Right, Tilted
+                 gsap.set(flyer, { 
+                     display: 'block', 
+                     x: 180, 
+                     y: -200, 
+                     rotation: 35, 
+                     scale: 0.8,
+                     opacity: 0,
+                     zIndex: zIndex 
+                 })
+             }
+             stateRef.current.zIndex++
+          })
+          // The Arc Motion
+          .to(rightFlyerRef.current, {
+             opacity: 1, duration: 0.2
+          }, "rightArc")
           .to(rightFlyerRef.current, {
              x: 0,
-             rotation: 0,
+             duration: MOBILE_ARC_DURATION,
+             ease: "power2.out"
+          }, "rightArc")
+          .to(rightFlyerRef.current, {
+             y: 0,
+             duration: MOBILE_ARC_DURATION,
+             ease: "bounce.out"
+          }, "rightArc")
+          .to(rightFlyerRef.current, {
+             rotation: (Math.random() * 4) - 2,
              scale: 1,
-             duration: MOBILE_FLY_DURATION,
-             ease: "power2.in"
-          })
-          // IMPACT
-          .to(centerPileRef.current, { 
-             scale: 0.95, 
-             duration: 0.1, 
-             ease: "power1.in" 
-          }, "<0.4") 
+             duration: MOBILE_ARC_DURATION,
+             ease: "power1.out"
+          }, "rightArc")
+          
           .call(() => {
-             const flyerSrc = (rightFlyerRef.current?.querySelector('.content-img') as HTMLImageElement)?.src
-             if(centerPileRef.current && flyerSrc) (centerPileRef.current.querySelector('.content-img') as HTMLImageElement).src = flyerSrc
+             const src = (rightFlyerRef.current?.querySelector('.content-img') as HTMLImageElement)?.src
+             if(centerPileRef.current && src) (centerPileRef.current.querySelector('.content-img') as HTMLImageElement).src = src
              gsap.set(rightFlyerRef.current, { display: 'none' })
+             stateRef.current.nextIdx++
           })
-          .to(centerPileRef.current, {
-             scale: 1.0,
-             duration: MOBILE_BOUNCE_DURATION,
-             ease: "back.out(3)"
-          })
-          .to({}, { duration: 0.5 })
+          
+          .to({}, { duration: MOBILE_INTERVAL })
 
     }, containerRef)
     return () => ctx.revert()
   }, [isReady])
 
-  const baseStyle: React.CSSProperties = {
+  const cardStyle: React.CSSProperties = {
       position: 'absolute',
       left: '50%',
       top: '50%',
@@ -305,32 +301,22 @@ const MobileCarouselGSAP = ({ isReady }: { isReady: boolean }) => {
       marginLeft: -MOBILE_CARD_W / 2,
       marginTop: -MOBILE_CARD_H / 2,
       willChange: 'transform',
-      transform: 'translateZ(0)'
+      transform: 'translateZ(0)',
   }
 
   return (
     <div ref={containerRef} style={{ position: 'relative', width: '100%', height: 350, overflow: 'hidden', touchAction: 'pan-y' }}>
       
-      {/* 1. Left Source Pile */}
-      <div ref={leftSourceRef} style={{ ...baseStyle, transform: 'translateX(-180px) rotate(-12deg) scale(0.9)', zIndex: 10, opacity: 0.5 }}>
-         <CardImageContent imageUrl={ALL_IMAGES[2]} isMobile={true} />
-      </div>
-
-      {/* 2. Right Source Pile */}
-      <div ref={rightSourceRef} style={{ ...baseStyle, transform: 'translateX(180px) rotate(12deg) scale(0.9)', zIndex: 10, opacity: 0.5 }}>
-         <CardImageContent imageUrl={ALL_IMAGES[3]} isMobile={true} />
-      </div>
-
-      {/* 3. Center Pile (Recipent) */}
-      <div ref={centerPileRef} style={{ ...baseStyle, zIndex: 20 }}>
+      {/* 1. Center Pile (Anchor) */}
+      <div ref={centerPileRef} style={{ ...cardStyle, zIndex: 10 }}>
          <CardImageContent imageUrl={ALL_IMAGES[0]} isMobile={true} />
       </div>
 
-      {/* 4. Flyers */}
-      <div ref={leftFlyerRef} style={{ ...baseStyle, display: 'none', zIndex: 30 }}>
+      {/* 2. Flyers (Left & Right) */}
+      <div ref={leftFlyerRef} style={{ ...cardStyle, display: 'none', zIndex: 20 }}>
          <CardImageContent imageUrl={ALL_IMAGES[0]} isMobile={true} />
       </div>
-      <div ref={rightFlyerRef} style={{ ...baseStyle, display: 'none', zIndex: 30 }}>
+      <div ref={rightFlyerRef} style={{ ...cardStyle, display: 'none', zIndex: 20 }}>
          <CardImageContent imageUrl={ALL_IMAGES[0]} isMobile={true} />
       </div>
 
@@ -520,7 +506,7 @@ const DesktopCarouselGSAP = () => {
 
 export default function Scene4({ className = '' }: { className?: string }) {
   const isMobile = useIsMobile()
-  const imagesLoaded = useImagePreloader(ALL_IMAGES) // Get loading state
+  const imagesLoaded = useImagePreloader(ALL_IMAGES)
 
   // OPTIMIZATION: Lenis Scroll (Desktop Only)
   useEffect(() => {
@@ -564,7 +550,7 @@ export default function Scene4({ className = '' }: { className?: string }) {
         </div>
 
         <div style={{ position: 'absolute', top: '50%', left: 0, right: 0, transform: 'translateY(-50%)' }}>
-          {/* Only render carousel when ready to prevent jank */}
+          {/* Ensure animation only starts when assets are ready */}
           <MobileCarouselGSAP isReady={imagesLoaded} />
         </div>
 
