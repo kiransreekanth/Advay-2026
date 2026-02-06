@@ -7,7 +7,7 @@ import BoundaryFrame from '@/components/ui/BoundaryFrame'
 import { COLORS } from '@/lib/constants'
 
 // ============================================
-// 1. GLOBAL CONSTANTS (Defined at Top Level)
+// 1. GLOBAL CONSTANTS (Top Level - Do Not Remove)
 // ============================================
 
 const FONTS = {
@@ -51,7 +51,7 @@ const VISIBLE_CARDS_DESKTOP = 6
 const MOBILE_CARD_W = 220
 const MOBILE_CARD_H = 320
 
-// Animation Timing (Global Access)
+// Animation Timing (Seconds)
 const PAUSE_DURATION = 1.0 
 const MOBILE_FLY_DURATION = 0.6 
 const SHIFT_DURATION = 0.5 
@@ -67,12 +67,22 @@ const CARD_OVERLAYS = [
 
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(false)
+  
   useLayoutEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768)
-    checkMobile()
-    window.addEventListener('resize', checkMobile)
-    return () => window.removeEventListener('resize', checkMobile)
+    const check = () => setIsMobile(window.innerWidth < 768)
+    check()
+    let timeoutId: NodeJS.Timeout
+    const handleResize = () => {
+      clearTimeout(timeoutId)
+      timeoutId = setTimeout(check, 100)
+    }
+    window.addEventListener('resize', handleResize)
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      clearTimeout(timeoutId)
+    }
   }, [])
+  
   return isMobile
 }
 
@@ -131,21 +141,18 @@ CardImageContent.displayName = 'CardImageContent'
 
 
 // ============================================
-// 4. MOBILE CAROUSEL ("Dealer" Animation)
+// 4. MOBILE CAROUSEL (Fixed)
 // ============================================
 
 const MobileCarouselGSAP = () => {
   const containerRef = useRef<HTMLDivElement>(null)
   
-  // Dynamic Pool (Flying Cards)
+  // Pool & Refs
   const POOL_SIZE = 20
   const poolRef = useRef<HTMLDivElement[]>([])
-  
-  // Static Stacks (Visual Sources)
   const leftStackRef = useRef<HTMLDivElement>(null)
   const rightStackRef = useRef<HTMLDivElement>(null)
   
-  // Logic State
   const stateRef = useRef({
     centerPileIndices: [] as number[], 
     globalImageIndex: 0,
@@ -156,7 +163,7 @@ const MobileCarouselGSAP = () => {
   useLayoutEffect(() => {
     const ctx = gsap.context(() => {
         
-        // --- SETUP STATIC PILES ---
+        // --- SETUP ---
         if(leftStackRef.current) {
             const img = leftStackRef.current.querySelector('.content-img') as HTMLImageElement
             if(img) img.src = ALL_IMAGES[2]
@@ -166,10 +173,9 @@ const MobileCarouselGSAP = () => {
             if(img) img.src = ALL_IMAGES[3]
         }
 
-        // --- SETUP CENTER PILE ---
+        // Initialize Center Pile
         poolRef.current.forEach(el => gsap.set(el, { display: 'none' }))
         
-        // Place first card
         const firstEl = poolRef.current[0]
         const firstImg = firstEl.querySelector('.content-img') as HTMLImageElement
         if(firstImg) firstImg.src = ALL_IMAGES[0]
@@ -186,7 +192,7 @@ const MobileCarouselGSAP = () => {
         const dealCard = () => {
             const { centerPileIndices, globalImageIndex, comingFromLeft, zIndexCounter } = stateRef.current
             
-            // 1. Find free node
+            // 1. Find Free Node
             let nodeToUseIdx = -1
             for(let i=0; i<POOL_SIZE; i++) {
                 if(!centerPileIndices.includes(i)) {
@@ -195,7 +201,7 @@ const MobileCarouselGSAP = () => {
                 }
             }
             
-            // If full, recycle bottom
+            // Recycle if full
             if (nodeToUseIdx === -1 || centerPileIndices.length > 8) {
                 const bottomIdx = centerPileIndices.shift() 
                 if (bottomIdx !== undefined) {
@@ -209,7 +215,6 @@ const MobileCarouselGSAP = () => {
                 const activeSourceRef = comingFromLeft ? leftStackRef : rightStackRef
                 const nextSourceImgUrl = ALL_IMAGES[globalImageIndex % ALL_IMAGES.length]
                 
-                // Get image from the visual source stack to simulate "picking it up"
                 const currentSourceImg = activeSourceRef.current?.querySelector('.content-img') as HTMLImageElement
                 const flyImgUrl = currentSourceImg?.src || ALL_IMAGES[0]
 
@@ -217,7 +222,6 @@ const MobileCarouselGSAP = () => {
                 const imgEl = el.querySelector('.content-img') as HTMLImageElement
                 if(imgEl) imgEl.src = flyImgUrl
                 
-                // Start Position (Match the static piles: +/- 170px)
                 const startX = comingFromLeft ? -170 : 170
                 const startRot = comingFromLeft ? -6 : 6
                 
@@ -230,22 +234,21 @@ const MobileCarouselGSAP = () => {
                     opacity: 1
                 })
                 
-                // 3. Update Static Source (Instant Swap)
+                // 3. Update Static Source
                 if (activeSourceRef.current) {
                     const sourceImg = activeSourceRef.current.querySelector('.content-img') as HTMLImageElement
                     if(sourceImg) sourceImg.src = nextSourceImgUrl
                     
-                    // Small pop animation
                     gsap.fromTo(activeSourceRef.current,
                         { scale: 0.85 },
                         { scale: 0.9, duration: 0.2, ease: "power2.out", overwrite: true }
                     )
                 }
 
-                // 4. Animate to Center
+                // 4. Animate
                 gsap.to(el, {
                     x: 0,
-                    rotation: (Math.random() * 4) - 2, // Slight organic messiness
+                    rotation: (Math.random() * 4) - 2,
                     scale: 1,
                     duration: MOBILE_FLY_DURATION,
                     ease: "back.out(1.0)"
@@ -267,7 +270,6 @@ const MobileCarouselGSAP = () => {
     return () => ctx.revert()
   }, [])
 
-  // Styles for static background piles
   const backingStackStyle = (isLeft: boolean): React.CSSProperties => ({
       position: 'absolute',
       left: '50%',
@@ -276,27 +278,24 @@ const MobileCarouselGSAP = () => {
       height: MOBILE_CARD_H,
       marginLeft: -MOBILE_CARD_W / 2,
       marginTop: -MOBILE_CARD_H / 2,
-      // Tilted and offset to look like piles waiting to be dealt
       transform: `translateX(${isLeft ? '-170px' : '170px'}) rotate(${isLeft ? '-6deg' : '6deg'}) scale(0.9)`,
       zIndex: 10,
       pointerEvents: 'none',
-      opacity: 0.6 // Slightly faded to emphasize center
+      opacity: 0.6 
   })
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', width: '100%', height: 350, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div ref={containerRef} style={{ position: 'relative', width: '100%', height: 350, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'pan-y' }}>
       
-      {/* STATIC LEFT PILE */}
+      {/* STATIC STACKS */}
       <div ref={leftStackRef} style={backingStackStyle(true)}>
          <CardImageContent imageUrl={ALL_IMAGES[2]} isMobile={true} />
       </div>
-
-      {/* STATIC RIGHT PILE */}
       <div ref={rightStackRef} style={backingStackStyle(false)}>
          <CardImageContent imageUrl={ALL_IMAGES[3]} isMobile={true} />
       </div>
 
-      {/* DYNAMIC CENTER PILE */}
+      {/* CENTER PILE */}
       {Array.from({ length: 20 }).map((_, i) => (
         <div 
           key={i}
@@ -318,7 +317,7 @@ const MobileCarouselGSAP = () => {
 }
 
 // ============================================
-// 5. DESKTOP CAROUSEL
+// 5. DESKTOP CAROUSEL (Fixed Transition)
 // ============================================
 
 const DesktopGalleryCard = React.memo(({
@@ -366,8 +365,9 @@ const DesktopGalleryCard = React.memo(({
         transform: `translateX(${moveOffset}px) translateZ(${translateZ}px) scale(${scale})`,
         zIndex,
         transformStyle: 'preserve-3d',
+        // FIX: Multiply seconds by 1000 for CSS ms
         transition: isShifting
-          ? `transform ${SHIFT_DURATION}ms cubic-bezier(0.25, 0.46, 0.45, 0.94)`
+          ? `transform ${SHIFT_DURATION * 1000}ms cubic-bezier(0.25, 0.46, 0.45, 0.94)`
           : 'none',
         willChange: 'transform',
       }}
@@ -501,6 +501,7 @@ export default function Scene4({ className = '' }: { className?: string }) {
   const isMobile = useIsMobile()
   useImagePreloader(ALL_IMAGES)
 
+  // OPTIMIZATION: Lenis Scroll (Desktop Only)
   useEffect(() => {
     if (isMobile) return 
     const lenis = new Lenis({
@@ -530,6 +531,7 @@ export default function Scene4({ className = '' }: { className?: string }) {
         <style jsx>{`@import url('https://fonts.googleapis.com/css2?family=Anton&family=Bebas+Neue&family=Inter:wght@400;500&display=swap');`}</style>
         <div style={{ position: 'absolute', inset: 0, background: bgGradient, pointerEvents: 'none' }} />
         <BoundaryFrame />
+
         <div style={{ position: 'absolute', top: '90px', left: '24px', right: '24px', zIndex: 1 }}>
           <div style={{ fontFamily: FONTS.mono, fontSize: '11px', color: COLORS.textMuted, letterSpacing: '0.05em', opacity: 0.8, display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px' }}>
              <span style={{ color: COLORS.red, fontSize: '8px' }}>●</span>
@@ -539,9 +541,11 @@ export default function Scene4({ className = '' }: { className?: string }) {
             MEMORIES<br />OF <span style={{ color: COLORS.red }}>ADVAY</span>.
           </h2>
         </div>
+
         <div style={{ position: 'absolute', top: '50%', left: 0, right: 0, transform: 'translateY(-50%)' }}>
           <MobileCarouselGSAP />
         </div>
+
         <div style={{ position: 'absolute', bottom: '40px', left: '24px', right: '24px', zIndex: 1 }}>
           <div style={{ fontFamily: FONTS.mono, fontSize: '9px', letterSpacing: '0.15em', color: COLORS.textMuted, marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px', textTransform: 'uppercase' }}>
             <span style={{ color: COLORS.red, fontSize: '5px' }}>■</span> GALLERY COLLECTION
