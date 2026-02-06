@@ -47,13 +47,15 @@ const DESKTOP_HEIGHT = 300
 const DESKTOP_SPACING = 160
 const VISIBLE_CARDS_DESKTOP = 6
 
+// Mobile settings - optimized for performance
 const MOBILE_CARD_W = 220
 const MOBILE_CARD_H = 320
+const MOBILE_GAP = 55
 
-// MOBILE OPTIMIZATION: Simplified timing
-const PAUSE_DURATION = 1.0 
-const FLY_DURATION = 0.5 // Faster = smoother on mobile
-const SHIFT_DURATION = 0.5
+// Timing - perfectly synchronized
+const ANIMATION_DURATION = 0.5  // Card fly-in duration
+const PAUSE_BETWEEN = 1.0       // Pause between animations
+const SHIFT_DURATION = 0.5      // Desktop compatibility
 
 const CARD_OVERLAYS = [
   'rgba(229, 9, 20, 0.12)', 'rgba(178, 7, 16, 0.15)', 'rgba(113, 121, 126, 0.12)',
@@ -83,7 +85,6 @@ function useIsMobile() {
   return isMobile
 }
 
-// Aggressive preloading
 function useImagePreloader(images: string[]) {
   useEffect(() => {
     const fragment = document.createDocumentFragment()
@@ -99,51 +100,34 @@ function useImagePreloader(images: string[]) {
 }
 
 // ============================================
-// CARD COMPONENT (MOBILE OPTIMIZED)
+// OPTIMIZED CARD COMPONENT
 // ============================================
 
-const CardImageContent = React.memo(({ 
-  imageUrl, 
-  overlayColor, 
-  isMobile = false 
-}: { 
-  imageUrl?: string
-  overlayColor?: string
-  isMobile?: boolean 
-}) => {
-  const safeSrc = imageUrl && imageUrl.length > 0 ? imageUrl : ALL_IMAGES[0]
-
-  // MOBILE: Simplified shadow (no multiple layers)
-  const shadowStyle: React.CSSProperties = {
-    position: 'absolute',
-    inset: isMobile ? '4px' : '0',
-    borderRadius: '12px',
-    backgroundColor: '#000',
-    boxShadow: isMobile ? '0 8px 16px rgba(0,0,0,0.5)' : '0 8px 16px rgba(0,0,0,0.4)',
-    opacity: 1,
-    // CRITICAL: Use transform3d for GPU acceleration
-    transform: 'translate3d(0,0,-1px)',
-  }
-
-  const imageContainerStyle: React.CSSProperties = {
-    position: 'absolute',
-    inset: 0,
-    borderRadius: '12px',
-    overflow: 'hidden',
-    backgroundColor: '#1a1a1a',
-    border: '1px solid rgba(255,255,255,0.1)',
-    // CRITICAL: Force GPU layer
-    transform: 'translate3d(0,0,0)',
-    backfaceVisibility: 'hidden',
-    WebkitBackfaceVisibility: 'hidden',
-  }
-
+const MobileCard = React.memo(({ imageUrl }: { imageUrl: string }) => {
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <div style={shadowStyle} />
-      <div style={imageContainerStyle}>
+      {/* Simplified shadow for mobile */}
+      <div style={{
+        position: 'absolute',
+        inset: '4px',
+        borderRadius: '12px',
+        backgroundColor: '#000',
+        boxShadow: '0 8px 16px rgba(0,0,0,0.5)',
+        transform: 'translate3d(0,0,-1px)',
+      }} />
+      
+      {/* Image container */}
+      <div style={{
+        position: 'absolute',
+        inset: 0,
+        borderRadius: '12px',
+        overflow: 'hidden',
+        backgroundColor: '#1a1a1a',
+        border: '1px solid rgba(255,255,255,0.1)',
+        transform: 'translate3d(0,0,0)',
+      }}>
         <img
-          src={safeSrc}
+          src={imageUrl}
           alt=""
           loading="eager"
           decoding="async"
@@ -151,255 +135,209 @@ const CardImageContent = React.memo(({
             width: '100%', 
             height: '100%', 
             objectFit: 'cover', 
-            display: 'block', 
-            pointerEvents: 'none',
-            // CRITICAL: GPU acceleration
+            display: 'block',
             transform: 'translate3d(0,0,0)',
           }}
           draggable={false}
         />
-        {!isMobile && overlayColor && (
-          <div style={{ 
-            position: 'absolute', 
-            inset: 0, 
-            background: overlayColor, 
-            mixBlendMode: 'multiply', 
-            pointerEvents: 'none' 
-          }} />
-        )}
         <div style={{ 
           position: 'absolute', 
           inset: 0, 
-          background: 'linear-gradient(180deg, transparent 50%, rgba(0,0,0,0.4) 100%)', 
-          pointerEvents: 'none' 
+          background: 'linear-gradient(180deg, transparent 50%, rgba(0,0,0,0.4) 100%)',
         }} />
       </div>
     </div>
   )
 })
-CardImageContent.displayName = 'CardImageContent'
+MobileCard.displayName = 'MobileCard'
 
 // ============================================
-// MOBILE CAROUSEL (ULTRA OPTIMIZED)
+// MOBILE CAROUSEL - COMPLETELY REWRITTEN
 // ============================================
 
 const MobileCarouselGSAP = () => {
   const containerRef = useRef<HTMLDivElement>(null)
   
-  // Pool of cards
-  const POOL_SIZE = 20
-  const poolRef = useRef<HTMLDivElement[]>([])
+  // 5 visible cards: positions -2, -1, 0, 1, 2
+  const VISIBLE_POSITIONS = [-2, -1, 0, 1, 2]
   
-  // Cache img elements to avoid querySelector
-  const poolImgRef = useRef<HTMLImageElement[]>([])
-  
-  // Static background cards
-  const staticCardsRef = useRef<{
-    leftFar: HTMLDivElement | null
-    leftNear: HTMLDivElement | null
-    rightNear: HTMLDivElement | null
-    rightFar: HTMLDivElement | null
+  // Card pools - one for each visible position
+  const cardRefs = useRef<{
+    [key: number]: HTMLDivElement[]
   }>({
-    leftFar: null,
-    leftNear: null,
-    rightNear: null,
-    rightFar: null,
+    '-2': [],
+    '-1': [],
+    '0': [],
+    '1': [],
+    '2': []
   })
   
-  // Cache static card images
-  const staticImgRef = useRef<{
-    leftFar: HTMLImageElement | null
-    leftNear: HTMLImageElement | null
-    rightNear: HTMLImageElement | null
-    rightFar: HTMLImageElement | null
-  }>({
-    leftFar: null,
-    leftNear: null,
-    rightNear: null,
-    rightFar: null,
-  })
-  
+  // Current state
   const stateRef = useRef({
-    centerPileIndices: [] as number[],
-    globalImageIndex: 0,
+    currentImageIndex: 0,
     comingFromLeft: true,
-    zIndexCounter: 100,
+    isAnimating: false,
   })
 
   useLayoutEffect(() => {
     const ctx = gsap.context(() => {
       
-      // Cache all image elements
-      poolRef.current.forEach((el, i) => {
-        const img = el?.querySelector('img')
-        if (img) poolImgRef.current[i] = img
-      })
-      
-      // Cache static card images
-      if (staticCardsRef.current.leftFar) {
-        staticImgRef.current.leftFar = staticCardsRef.current.leftFar.querySelector('img')
-      }
-      if (staticCardsRef.current.leftNear) {
-        staticImgRef.current.leftNear = staticCardsRef.current.leftNear.querySelector('img')
-      }
-      if (staticCardsRef.current.rightNear) {
-        staticImgRef.current.rightNear = staticCardsRef.current.rightNear.querySelector('img')
-      }
-      if (staticCardsRef.current.rightFar) {
-        staticImgRef.current.rightFar = staticCardsRef.current.rightFar.querySelector('img')
+      // Position calculator
+      const getPositionStyle = (pos: number) => {
+        const x = pos * MOBILE_GAP
+        const rotation = pos === 0 ? 0 : pos * 3
+        const scale = pos === 0 ? 1 : 0.88
+        const zIndex = 100 - Math.abs(pos) * 10
+        const opacity = 0.9
+        
+        return { x, rotation, scale, zIndex, opacity }
       }
       
-      // Initialize static background images
-      if (staticImgRef.current.leftFar) staticImgRef.current.leftFar.src = ALL_IMAGES[2]
-      if (staticImgRef.current.leftNear) staticImgRef.current.leftNear.src = ALL_IMAGES[1]
-      if (staticImgRef.current.rightNear) staticImgRef.current.rightNear.src = ALL_IMAGES[3]
-      if (staticImgRef.current.rightFar) staticImgRef.current.rightFar.src = ALL_IMAGES[4]
-      
-      // Position static cards with GSAP (GPU accelerated)
-      const staticPositions = [
-        { ref: staticCardsRef.current.leftFar, x: -90, rot: -6 },
-        { ref: staticCardsRef.current.leftNear, x: -45, rot: -3 },
-        { ref: staticCardsRef.current.rightNear, x: 45, rot: 3 },
-        { ref: staticCardsRef.current.rightFar, x: 90, rot: 6 },
-      ]
-      
-      staticPositions.forEach(({ ref, x, rot }) => {
-        if (ref) {
-          gsap.set(ref, {
-            x,
-            rotation: rot,
-            scale: 0.88,
-            zIndex: 5,
-            opacity: 0.85, // Slightly transparent instead of brightness filter
+      // Initialize all 5 visible cards (one at each position)
+      VISIBLE_POSITIONS.forEach((pos, idx) => {
+        const pool = cardRefs.current[pos]
+        const activeCard = pool[0] // Use first card in each pool
+        
+        if (activeCard) {
+          const imgEl = activeCard.querySelector('img')
+          if (imgEl) {
+            imgEl.src = ALL_IMAGES[idx % ALL_IMAGES.length]
+          }
+          
+          const style = getPositionStyle(pos)
+          gsap.set(activeCard, {
+            display: 'block',
+            x: style.x,
+            rotation: style.rotation,
+            scale: style.scale,
+            zIndex: style.zIndex,
+            opacity: style.opacity,
           })
         }
       })
       
-      // Hide all pool nodes
-      poolRef.current.forEach(el => {
-        if (el) gsap.set(el, { display: 'none' })
-      })
+      stateRef.current.currentImageIndex = 5
       
-      // Initialize first center card
-      const firstEl = poolRef.current[0]
-      if (firstEl && poolImgRef.current[0]) {
-        poolImgRef.current[0].src = ALL_IMAGES[0]
-        gsap.set(firstEl, { 
-          display: 'block', 
-          x: 0, 
-          rotation: 0, 
-          scale: 1, 
-          zIndex: 100,
-          opacity: 1,
-        })
-        stateRef.current.centerPileIndices.push(0)
-        stateRef.current.globalImageIndex = 5
-        stateRef.current.zIndexCounter = 101
-      }
-      
-      // Animation cycle
-      const dealCard = () => {
-        const { centerPileIndices, globalImageIndex, comingFromLeft, zIndexCounter } = stateRef.current
+      // Main animation function - PERFECTLY SYNCHRONIZED
+      const animateNext = () => {
+        if (stateRef.current.isAnimating) return
+        stateRef.current.isAnimating = true
         
-        // Find free pool node
-        let nodeToUseIdx = -1
-        for (let i = 0; i < POOL_SIZE; i++) {
-          if (!centerPileIndices.includes(i)) {
-            nodeToUseIdx = i
+        const { currentImageIndex, comingFromLeft } = stateRef.current
+        const nextImageUrl = ALL_IMAGES[currentImageIndex % ALL_IMAGES.length]
+        
+        // Create timeline for perfect synchronization
+        const tl = gsap.timeline({
+          onComplete: () => {
+            stateRef.current.currentImageIndex++
+            stateRef.current.comingFromLeft = !comingFromLeft
+            stateRef.current.isAnimating = false
+            
+            // Schedule next animation
+            gsap.delayedCall(PAUSE_BETWEEN, animateNext)
+          }
+        })
+        
+        // Get the card that will enter from the side
+        const enterPosition = comingFromLeft ? -2 : 2
+        const pool = cardRefs.current[enterPosition]
+        
+        // Find unused card in the pool (or recycle oldest)
+        let enterCard: HTMLDivElement | null = null
+        for (let i = 0; i < pool.length; i++) {
+          const card = pool[i]
+          const currentDisplay = gsap.getProperty(card, 'display')
+          if (currentDisplay === 'none') {
+            enterCard = card
             break
           }
         }
         
-        // Recycle if pile too high
-        if (nodeToUseIdx === -1 || centerPileIndices.length > 6) {
-          const bottomIdx = centerPileIndices.shift()
-          if (bottomIdx !== undefined) {
-            const bottomEl = poolRef.current[bottomIdx]
-            if (bottomEl) gsap.set(bottomEl, { display: 'none' })
-            if (nodeToUseIdx === -1) nodeToUseIdx = bottomIdx
-          }
+        // If all cards are in use, recycle the last one
+        if (!enterCard && pool.length > 0) {
+          enterCard = pool[pool.length - 1]
         }
         
-        if (nodeToUseIdx !== -1) {
-          const el = poolRef.current[nodeToUseIdx]
-          const imgEl = poolImgRef.current[nodeToUseIdx]
+        if (enterCard) {
+          // Update image
+          const imgEl = enterCard.querySelector('img')
+          if (imgEl) imgEl.src = nextImageUrl
           
-          // Determine source
-          const activeSourceImg = comingFromLeft 
-            ? staticImgRef.current.leftFar 
-            : staticImgRef.current.rightFar
+          // Set initial position (far off-screen)
+          const startX = comingFromLeft ? -3 * MOBILE_GAP : 3 * MOBILE_GAP
+          const startRotation = comingFromLeft ? -9 : 9
           
-          const activeSourceCard = comingFromLeft
-            ? staticCardsRef.current.leftFar
-            : staticCardsRef.current.rightFar
+          gsap.set(enterCard, {
+            display: 'block',
+            x: startX,
+            rotation: startRotation,
+            scale: 0.8,
+            zIndex: 150, // Highest z-index during animation
+            opacity: 1,
+          })
           
-          // Get images
-          const movingImgUrl = activeSourceImg?.src || ALL_IMAGES[0]
-          const nextSourceImgUrl = ALL_IMAGES[globalImageIndex % ALL_IMAGES.length]
+          // ALL ANIMATIONS HAPPEN IN THE SAME TIMELINE AT THE SAME TIME
+          // This ensures perfect synchronization
           
-          // Setup moving card
-          if (imgEl) imgEl.src = movingImgUrl
+          // Animate the entering card to center (position 0)
+          tl.to(enterCard, {
+            x: 0,
+            rotation: 0,
+            scale: 1,
+            zIndex: 100,
+            duration: ANIMATION_DURATION,
+            ease: 'power2.out',
+          }, 0) // Start at time 0
           
-          const startX = comingFromLeft ? -90 : 90
-          const startRot = comingFromLeft ? -6 : 6
-          
-          if (el) {
-            // Set start position
-            gsap.set(el, {
-              display: 'block',
-              x: startX,
-              rotation: startRot,
-              scale: 0.88,
-              zIndex: zIndexCounter,
-              opacity: 1,
-            })
+          // Animate all existing visible cards
+          VISIBLE_POSITIONS.forEach((pos) => {
+            const pool = cardRefs.current[pos]
             
-            // Animate to center with optimized settings
-            gsap.to(el, {
-              x: 0,
-              rotation: 0, // FIXED: No random rotation for consistent performance
-              scale: 1,
-              duration: FLY_DURATION,
-              ease: "power2.out", // Simpler easing for mobile
+            pool.forEach((card) => {
+              const currentDisplay = gsap.getProperty(card, 'display')
+              if (currentDisplay === 'none' || card === enterCard) return
+              
+              // Calculate new position
+              const shift = comingFromLeft ? 1 : -1
+              const newPos = pos + shift
+              
+              // If card moves off-screen, fade out
+              if (Math.abs(newPos) > 2) {
+                tl.to(card, {
+                  opacity: 0,
+                  scale: 0.7,
+                  duration: ANIMATION_DURATION,
+                  ease: 'power2.in',
+                  onComplete: () => {
+                    gsap.set(card, { display: 'none' })
+                  }
+                }, 0) // Start at time 0
+              } else {
+                // Move to new position
+                const newStyle = getPositionStyle(newPos)
+                tl.to(card, {
+                  x: newStyle.x,
+                  rotation: newStyle.rotation,
+                  scale: newStyle.scale,
+                  zIndex: newStyle.zIndex,
+                  opacity: newStyle.opacity,
+                  duration: ANIMATION_DURATION,
+                  ease: 'power2.out',
+                }, 0) // Start at time 0
+              }
             })
-          }
-          
-          // Update source stack image (happens during animation, not before)
-          if (activeSourceImg) {
-            // Use requestAnimationFrame to batch DOM update
-            requestAnimationFrame(() => {
-              if (activeSourceImg) activeSourceImg.src = nextSourceImgUrl
-            })
-          }
-          
-          // Subtle pop on source card
-          if (activeSourceCard) {
-            gsap.fromTo(activeSourceCard,
-              { scale: 0.82 },
-              { scale: 0.88, duration: 0.2, ease: "power1.out" }
-            )
-          }
-          
-          // Update state
-          centerPileIndices.push(nodeToUseIdx)
-          stateRef.current.globalImageIndex++
-          stateRef.current.comingFromLeft = !comingFromLeft
-          stateRef.current.zIndexCounter++
+          })
         }
-        
-        // Loop
-        gsap.delayedCall(PAUSE_DURATION, dealCard)
       }
       
-      // Start
-      gsap.delayedCall(0.5, dealCard)
+      // Start animation loop
+      gsap.delayedCall(PAUSE_BETWEEN, animateNext)
       
     }, containerRef)
     
     return () => ctx.revert()
   }, [])
 
-  // Base card style (optimized for GPU)
   const cardBaseStyle: React.CSSProperties = {
     position: 'absolute',
     left: '50%',
@@ -411,7 +349,7 @@ const MobileCarouselGSAP = () => {
     willChange: 'transform',
     backfaceVisibility: 'hidden',
     WebkitBackfaceVisibility: 'hidden',
-    pointerEvents: 'none',
+    display: 'none',
   }
 
   return (
@@ -422,52 +360,31 @@ const MobileCarouselGSAP = () => {
         width: '100%', 
         height: 350, 
         overflow: 'hidden',
-        // CRITICAL: Isolate this section
-        isolation: 'isolate',
       }}
     >
-      {/* Static background cards (4 cards on sides) */}
-      <div 
-        ref={el => { staticCardsRef.current.leftFar = el }} 
-        style={cardBaseStyle}
-      >
-        <CardImageContent imageUrl={ALL_IMAGES[2]} isMobile={true} />
-      </div>
-      <div 
-        ref={el => { staticCardsRef.current.leftNear = el }} 
-        style={cardBaseStyle}
-      >
-        <CardImageContent imageUrl={ALL_IMAGES[1]} isMobile={true} />
-      </div>
-      <div 
-        ref={el => { staticCardsRef.current.rightNear = el }} 
-        style={cardBaseStyle}
-      >
-        <CardImageContent imageUrl={ALL_IMAGES[3]} isMobile={true} />
-      </div>
-      <div 
-        ref={el => { staticCardsRef.current.rightFar = el }} 
-        style={cardBaseStyle}
-      >
-        <CardImageContent imageUrl={ALL_IMAGES[4]} isMobile={true} />
-      </div>
-      
-      {/* Animated pool cards */}
-      {Array.from({ length: POOL_SIZE }).map((_, i) => (
-        <div 
-          key={i}
-          ref={el => { if (el) poolRef.current[i] = el }}
-          style={cardBaseStyle}
-        >
-          <CardImageContent imageUrl={ALL_IMAGES[i]} isMobile={true} />
-        </div>
+      {/* Create 2 cards for each position (double buffering) */}
+      {VISIBLE_POSITIONS.map((pos) => (
+        <React.Fragment key={pos}>
+          <div 
+            ref={el => { if (el) cardRefs.current[pos][0] = el }}
+            style={cardBaseStyle}
+          >
+            <MobileCard imageUrl={ALL_IMAGES[0]} />
+          </div>
+          <div 
+            ref={el => { if (el) cardRefs.current[pos][1] = el }}
+            style={cardBaseStyle}
+          >
+            <MobileCard imageUrl={ALL_IMAGES[0]} />
+          </div>
+        </React.Fragment>
       ))}
     </div>
   )
 }
 
 // ============================================
-// DESKTOP CAROUSEL (Unchanged)
+// DESKTOP CAROUSEL
 // ============================================
 
 const DesktopCarouselGSAP = () => {
@@ -540,7 +457,7 @@ const DesktopCarouselGSAP = () => {
             const loop = () => {
                 animateSide('left', leftCardsRef.current, stateRef.current.leftPositions, 'leftIdx')
                 animateSide('right', rightCardsRef.current, stateRef.current.rightPositions, 'rightIdx')
-                gsap.delayedCall(PAUSE_DURATION + (SHIFT_DURATION * 0.5), loop)
+                gsap.delayedCall(PAUSE_BETWEEN + (SHIFT_DURATION * 0.5), loop)
             }
             loop()
         }, containerRef)
@@ -559,6 +476,38 @@ const DesktopCarouselGSAP = () => {
         willChange: 'transform',
         visibility: 'hidden'
     }
+
+    const CardImageContent = React.memo(({ imageUrl, overlayColor }: { imageUrl: string, overlayColor?: string }) => (
+      <div style={{ width: '100%', height: '100%', position: 'relative', transformStyle: 'preserve-3d' }}>
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          borderRadius: '12px',
+          backgroundColor: '#000',
+          boxShadow: '0 8px 16px rgba(0,0,0,0.4)',
+          transform: 'translateZ(-1px)',
+        }} />
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          borderRadius: '12px',
+          overflow: 'hidden',
+          backgroundColor: '#1a1a1a',
+          border: '1px solid rgba(255,255,255,0.1)',
+          transform: 'translateZ(0)',
+        }}>
+          <img
+            src={imageUrl}
+            alt=""
+            loading="eager"
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+          {overlayColor && <div style={{ position: 'absolute', inset: 0, background: overlayColor, mixBlendMode: 'multiply' }} />}
+          <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, transparent 50%, rgba(0,0,0,0.4) 100%)' }} />
+        </div>
+      </div>
+    ))
+    CardImageContent.displayName = 'CardImageContent'
 
     return (
         <div ref={containerRef} style={{ position: 'relative', width: '100%', height: '420px', perspective: '1200px', perspectiveOrigin: '50% 50%', overflow: 'hidden' }}>
@@ -582,14 +531,13 @@ const DesktopCarouselGSAP = () => {
 }
 
 // ============================================
-// MAIN EXPORT
+// MAIN COMPONENT
 // ============================================
 
 export default function Scene4({ className = '' }: { className?: string }) {
   const isMobile = useIsMobile()
   useImagePreloader(ALL_IMAGES)
 
-  // Lenis only on desktop
   useEffect(() => {
     if (isMobile) return
     
@@ -628,9 +576,6 @@ export default function Scene4({ className = '' }: { className?: string }) {
           minHeight: '700px', 
           background: COLORS.bg, 
           overflow: 'hidden',
-          // CRITICAL: Hardware acceleration hint
-          WebkitTransform: 'translateZ(0)',
-          transform: 'translateZ(0)',
         }}
       >
         <style jsx>{`@import url('https://fonts.googleapis.com/css2?family=Anton&family=Bebas+Neue&family=Inter:wght@400;500&display=swap');`}</style>
