@@ -2,7 +2,6 @@
 
 import React, { useRef, useState, useEffect, useLayoutEffect, useMemo } from 'react'
 import gsap from 'gsap'
-import Lenis from 'lenis'
 import BoundaryFrame from '@/components/ui/BoundaryFrame'
 import { COLORS } from '@/lib/constants'
 
@@ -140,61 +139,79 @@ CardImageContent.displayName = 'CardImageContent'
 
 
 // ============================================
-// 4. MOBILE CAROUSEL (Tilted 3D Ring)
+// 4. MOBILE CAROUSEL (Interactive Tilted Ring)
 // ============================================
 
 const MobileCarouselGSAP = () => {
   const containerRef = useRef<HTMLDivElement>(null)
   const spinnerRef = useRef<HTMLDivElement>(null)
+  const tweenRef = useRef<gsap.core.Tween | null>(null) // Ref to control animation
   
-  // 1. Math for the Circle
+  // Math for the Circle
   const numCards = ALL_IMAGES.length
-  // r = (width + gap) / (2 * tan(PI/n))
   const radius = Math.round( (MOBILE_CARD_W + MOBILE_GAP) / (2 * Math.tan(Math.PI / numCards)) )
   
   useLayoutEffect(() => {
     const ctx = gsap.context(() => {
-        // Spin the ring continuously
-        gsap.to(spinnerRef.current, {
-            rotationY: -360,
-            duration: 50, 
-            ease: "none",
-            repeat: -1
-        })
+        // Create the tween and assign to ref
+        // We use 'fromTo' to be explicit about the starting point to prevent jumpiness on re-renders
+        tweenRef.current = gsap.fromTo(spinnerRef.current, 
+            { rotationY: 0 },
+            {
+                rotationY: -360,
+                duration: 50, 
+                ease: "none", // CRITICAL: Strict linear easing for continuous loop
+                repeat: -1,
+                overwrite: "auto"
+            }
+        )
     }, containerRef)
-    return () => ctx.revert()
+    return () => {
+        tweenRef.current?.kill() // Cleanup
+        ctx.revert()
+    }
   }, [radius])
+
+  // --- Interaction Handlers ---
+  const handlePause = () => {
+    tweenRef.current?.pause()
+  }
+
+  const handleResume = () => {
+    tweenRef.current?.play()
+  }
 
   return (
     <div 
-      ref={containerRef} 
+      ref={containerRef}
+      // Attach listeners to the main container to catch sloppy touches
+      onTouchStart={handlePause}
+      onTouchEnd={handleResume}
+      // Mouse events for desktop testing capability
+      onMouseEnter={handlePause}
+      onMouseLeave={handleResume}
       style={{ 
         position: 'relative', 
         width: '100%', 
-        // Increased height to prevent reflection clipping and accommodate tilt
         height: '600px', 
         perspective: '1200px', 
         display: 'flex', 
         alignItems: 'center', 
         justifyContent: 'center', 
         overflow: 'hidden', 
-        marginTop: '-50px' // Pull up slightly to center vertically in viewport
+        marginTop: '-50px',
+        cursor: 'grab' // Hint that it's interactive
       }}
     >
-        {/* SCENE WRAPPER */}
         <div 
             style={{
                 position: 'relative',
                 width: MOBILE_CARD_W,
                 height: MOBILE_CARD_H,
                 transformStyle: 'preserve-3d',
-                // TILT ADJUSTMENT:
-                // rotateX(-15deg) makes the "back" of the ring rise up,
-                // making it visible behind the front cards.
                 transform: `translateZ(-${radius}px) rotateX(-15deg)`,
             }}
         >
-            {/* SPINNER */}
             <div 
                 ref={spinnerRef}
                 style={{
@@ -212,14 +229,12 @@ const MobileCarouselGSAP = () => {
                             top: 0,
                             width: '100%',
                             height: '100%',
-                            // Position in circle
                             transform: `rotateY(${i * (360 / numCards)}deg) translateZ(${radius}px)`,
-                            // IMPORTANT: visible backface allows seeing cards on the rear arc
                             backfaceVisibility: 'visible', 
-                            // REFLECTION FIX:
-                            // Extended the gradient stop to 50% to show full reflection
-                            // Added bottom padding via box-reflect offset (below 4px)
-                            WebkitBoxReflect: 'below 4px linear-gradient(transparent, transparent 20%, rgba(0,0,0,0.4))'
+                            WebkitBoxReflect: 'below 4px linear-gradient(transparent, transparent 20%, rgba(0,0,0,0.4))',
+                            // Prevent image dragging from interfering with touch events
+                            userSelect: 'none',
+                            pointerEvents: 'none' // Let clicks pass through to container
                         }}
                     >
                         <CardImageContent imageUrl={src} isMobile={true} />
@@ -414,24 +429,7 @@ export default function Scene4({ className = '' }: { className?: string }) {
   const isMobile = useIsMobile()
   useImagePreloader(ALL_IMAGES)
 
-  // OPTIMIZATION: Lenis Scroll (Desktop Only)
-  useEffect(() => {
-    if (isMobile) return 
-    const lenis = new Lenis({
-      duration: 1.2,
-      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-      orientation: 'vertical',
-      gestureOrientation: 'vertical',
-      smoothWheel: true,
-      touchMultiplier: 2,
-    })
-    function raf(time: number) {
-      lenis.raf(time)
-      requestAnimationFrame(raf)
-    }
-    requestAnimationFrame(raf)
-    return () => lenis.destroy()
-  }, [isMobile])
+  // NOTE: Lenis scroll effect has been completely removed as requested.
 
   const bgGradient = useMemo(() => isMobile 
     ? `radial-gradient(ellipse at 50% 50%, ${COLORS.red}08 0%, transparent 60%), ${COLORS.bg}`
