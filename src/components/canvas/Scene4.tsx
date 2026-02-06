@@ -50,10 +50,10 @@ const VISIBLE_CARDS_DESKTOP = 6
 const MOBILE_CARD_W = 220
 const MOBILE_CARD_H = 320
 
-// ANIMATION SETTINGS
-const PAUSE_DURATION = 1.0 
-const MOBILE_FLY_DURATION = 0.7 // Duration of the "deal"
-const SHIFT_DURATION = 0.5 // For desktop
+// ANIMATION CONSTANTS
+const PAUSE_DURATION = 1.2
+const FLY_DURATION = 0.6 
+const SHIFT_DURATION = 0.5 
 
 const CARD_OVERLAYS = [
   'rgba(229, 9, 20, 0.12)', 'rgba(178, 7, 16, 0.15)', 'rgba(113, 121, 126, 0.12)',
@@ -67,28 +67,41 @@ const CARD_OVERLAYS = [
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(false)
   useLayoutEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768)
-    checkMobile()
-    window.addEventListener('resize', checkMobile)
-    return () => window.removeEventListener('resize', checkMobile)
+    // Immediate check
+    const check = () => setIsMobile(window.innerWidth < 768)
+    check()
+    
+    // Debounced resize listener for performance
+    let timeoutId: NodeJS.Timeout
+    const handleResize = () => {
+      clearTimeout(timeoutId)
+      timeoutId = setTimeout(check, 100)
+    }
+    
+    window.addEventListener('resize', handleResize)
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      clearTimeout(timeoutId)
+    }
   }, [])
   return isMobile
 }
 
 function useImagePreloader(images: string[]) {
   useEffect(() => {
-    images.forEach((src) => {
+    // Only preload the first 5 to allow page interactivity faster
+    const subset = images.slice(0, 5)
+    subset.forEach((src) => {
       const img = new Image()
       img.src = src
-      if (img.decode) {
-        img.decode().catch(() => {})
-      }
+      // Force decode
+      if (img.decode) img.decode().catch(() => {})
     })
   }, [images])
 }
 
 // ============================================
-// COMPONENT: CARD (Pure Visuals)
+// COMPONENT: CARD (Maximum Performance)
 // ============================================
 
 const CardImageContent = React.memo(({ imageUrl, overlayColor, isMobile = false }: { imageUrl?: string, overlayColor?: string, isMobile?: boolean }) => {
@@ -96,16 +109,20 @@ const CardImageContent = React.memo(({ imageUrl, overlayColor, isMobile = false 
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', transformStyle: 'preserve-3d' }}>
+      
+      {/* SHADOW - Static on mobile for performance */}
       <div className="card-shadow" style={{
         position: 'absolute',
         inset: isMobile ? '6px' : '0',
         borderRadius: '12px',
         backgroundColor: '#000',
-        boxShadow: isMobile ? `0 12px 24px rgba(0,0,0,0.6)` : '0 8px 16px rgba(0,0,0,0.4)',
+        // Mobile: Simpler shadow, no blur animation
+        boxShadow: isMobile ? `0 4px 12px rgba(0,0,0,0.8)` : '0 8px 16px rgba(0,0,0,0.4)',
         opacity: 1,
         transform: 'translateZ(-1px)',
-        transition: 'box-shadow 0.4s ease'
       }} />
+
+      {/* IMAGE */}
       <div className="card-image" style={{
         position: 'absolute',
         inset: 0,
@@ -120,10 +137,12 @@ const CardImageContent = React.memo(({ imageUrl, overlayColor, isMobile = false 
           alt=""
           loading="eager"
           className="content-img"
-          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', pointerEvents: 'none' }}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', pointerEvents: 'none', userSelect: 'none' }}
         />
         {!isMobile && overlayColor && <div style={{ position: 'absolute', inset: 0, background: overlayColor, mixBlendMode: 'multiply', pointerEvents: 'none' }} />}
-        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, transparent 50%, rgba(0,0,0,0.4) 100%)', pointerEvents: 'none' }} />
+        
+        {/* Simple Gradient overlay - cheaper than filters */}
+        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, transparent 60%, rgba(0,0,0,0.6) 100%)', pointerEvents: 'none' }} />
       </div>
     </div>
   )
@@ -132,135 +151,144 @@ CardImageContent.displayName = 'CardImageContent'
 
 
 // ============================================
-// MOBILE CAROUSEL (Tilted Dealer Logic)
+// MOBILE CAROUSEL ("Card Game" Dealer Logic)
 // ============================================
 
 const MobileCarouselGSAP = () => {
   const containerRef = useRef<HTMLDivElement>(null)
   
-  // 1. Moving Pool (The cards that fly)
-  const POOL_SIZE = 15
+  // POOL: 20 nodes recycled endlessly
+  const POOL_SIZE = 20
   const poolRef = useRef<HTMLDivElement[]>([])
   
-  // 2. Static Backing Stacks (Visible piles at edges)
+  // STATIC REFS: The visual piles at the edges
   const leftStackRef = useRef<HTMLDivElement>(null)
   const rightStackRef = useRef<HTMLDivElement>(null)
   
-  // Logic State
   const stateRef = useRef({
+    centerPile: [] as number[], // Indices of nodes in the center
     globalIndex: 0,
-    pileIndex: 0,
     comingFromLeft: true,
-    zIndexCounter: 200
+    zIndexCounter: 1000 // Monotonic Z-Index
   })
 
   useLayoutEffect(() => {
     const ctx = gsap.context(() => {
-      
-      // --- SETUP ---
-      poolRef.current.forEach(el => gsap.set(el, { display: 'none' }))
-      
-      // Setup Source Stacks with initial images
-      if (leftStackRef.current) {
-          const img = leftStackRef.current.querySelector('.content-img') as HTMLImageElement
-          if(img) img.src = ALL_IMAGES[2] 
-      }
-      if (rightStackRef.current) {
-          const img = rightStackRef.current.querySelector('.content-img') as HTMLImageElement
-          if(img) img.src = ALL_IMAGES[3]
-      }
+        
+        // --- 1. SETUP ---
+        poolRef.current.forEach(el => gsap.set(el, { display: 'none' }))
+        
+        // Setup Visual Sources
+        if (leftStackRef.current) {
+            const img = leftStackRef.current.querySelector('.content-img') as HTMLImageElement
+            if(img) img.src = ALL_IMAGES[2] 
+        }
+        if (rightStackRef.current) {
+            const img = rightStackRef.current.querySelector('.content-img') as HTMLImageElement
+            if(img) img.src = ALL_IMAGES[3]
+        }
 
-      // Initialize Center with 1 straight card
-      const firstEl = poolRef.current[0]
-      const firstImg = firstEl.querySelector('.content-img') as HTMLImageElement
-      if(firstImg) firstImg.src = ALL_IMAGES[0]
-      gsap.set(firstEl, { display: 'block', x: 0, rotation: 0, scale: 1, zIndex: 100 })
-      
-      stateRef.current.globalIndex = 4 
-      stateRef.current.pileIndex = 1
-
-      // --- ANIMATION LOOP ---
-      const dealCard = () => {
-        const { globalIndex, comingFromLeft, zIndexCounter, pileIndex } = stateRef.current
+        // Initialize Center Pile with 1 Card
+        const firstEl = poolRef.current[0]
+        const firstImg = firstEl.querySelector('.content-img') as HTMLImageElement
+        if(firstImg) firstImg.src = ALL_IMAGES[0]
         
-        // A. Get Next Moving Card Node
-        const poolIndex = pileIndex % POOL_SIZE
-        const el = poolRef.current[poolIndex]
-        
-        // B. Logic for Tilt & Position
-        const extremeX = 180 // Start further out
-        const startX = comingFromLeft ? -extremeX : extremeX
-        
-        // TILT LOGIC:
-        // Left entry: Tilt LEFT (-15deg)
-        // Right entry: Tilt RIGHT (+15deg)
-        const startRot = comingFromLeft ? -15 : 15
-        
-        const currentImgUrl = ALL_IMAGES[globalIndex % ALL_IMAGES.length]
-        const nextStackImgUrl = ALL_IMAGES[(globalIndex + 2) % ALL_IMAGES.length]
-
-        // 1. Prepare Moving Card
-        const imgEl = el.querySelector('.content-img') as HTMLImageElement
-        if(imgEl) imgEl.src = currentImgUrl
-        
-        // Set Initial State (Tilted)
-        gsap.set(el, {
-            display: 'block',
-            x: startX,
-            y: 0,
-            rotation: startRot, // Start tilted
-            scale: 0.9,
-            zIndex: zIndexCounter,
-            opacity: 1
+        gsap.set(firstEl, { 
+            display: 'block', x: 0, rotation: 0, scale: 1, zIndex: 100 
         })
+        
+        stateRef.current.centerPile.push(0)
+        stateRef.current.globalIndex = 4
+        stateRef.current.zIndexCounter = 101
 
-        // 2. Update Source Stack (Instant swap underneath)
-        const stackToUpdate = comingFromLeft ? leftStackRef.current : rightStackRef.current
-        if (stackToUpdate) {
-            const stackImg = stackToUpdate.querySelector('.content-img') as HTMLImageElement
-            if(stackImg) stackImg.src = nextStackImgUrl
+        // --- 2. ANIMATION LOOP ---
+        const dealCard = () => {
+            const { centerPile, globalIndex, comingFromLeft, zIndexCounter } = stateRef.current
             
-            // Visual "Pop" to show a card left the stack
-            gsap.fromTo(stackToUpdate, 
-                { scale: 0.85 }, 
-                { scale: 0.9, duration: 0.3, ease: "back.out(1.5)" }
-            )
+            // A. Find Free Node
+            let nodeToUseIdx = -1
+            
+            // Look for unused node
+            for(let i=0; i<POOL_SIZE; i++) {
+                if(!centerPile.includes(i)) {
+                    nodeToUseIdx = i
+                    break
+                }
+            }
+            
+            // If pile too big (>8), steal the bottom-most card
+            if (nodeToUseIdx === -1 || centerPile.length > 8) {
+                const bottomIdx = centerPile.shift() 
+                if (bottomIdx !== undefined) {
+                    gsap.set(poolRef.current[bottomIdx], { display: 'none' })
+                    if (nodeToUseIdx === -1) nodeToUseIdx = bottomIdx
+                }
+            }
+
+            if (nodeToUseIdx !== -1) {
+                const el = poolRef.current[nodeToUseIdx]
+                const activeSourceRef = comingFromLeft ? leftStackRef : rightStackRef
+                
+                const currentImg = activeSourceRef.current?.querySelector('.content-img') as HTMLImageElement
+                const movingImgUrl = currentImg?.src || ALL_IMAGES[0]
+                const nextSourceImgUrl = ALL_IMAGES[globalIndex % ALL_IMAGES.length]
+                
+                // 1. Setup Moving Card
+                const imgEl = el.querySelector('.content-img') as HTMLImageElement
+                if(imgEl) imgEl.src = movingImgUrl
+                
+                // Position logic
+                const startX = comingFromLeft ? -170 : 170
+                const startRot = comingFromLeft ? -6 : 6
+                
+                gsap.set(el, {
+                    display: 'block',
+                    x: startX,
+                    rotation: startRot,
+                    scale: 0.9,
+                    zIndex: zIndexCounter,
+                    opacity: 1
+                })
+                
+                // 2. Animate to Center
+                gsap.to(el, {
+                    x: 0,
+                    rotation: (Math.random() * 4) - 2,
+                    scale: 1,
+                    duration: FLY_DURATION,
+                    ease: "back.out(1.0)",
+                    force3D: true // Force GPU
+                })
+                
+                // 3. Update Source Stack (Instant)
+                if (activeSourceRef.current) {
+                    const sourceImg = activeSourceRef.current.querySelector('.content-img') as HTMLImageElement
+                    if(sourceImg) sourceImg.src = nextSourceImgUrl
+                    
+                    // Simple scale bump
+                    gsap.fromTo(activeSourceRef.current,
+                        { scale: 0.85 },
+                        { scale: 0.9, duration: 0.2, ease: "power1.out", overwrite: true }
+                    )
+                }
+
+                // Update State
+                centerPile.push(nodeToUseIdx)
+                stateRef.current.globalIndex++
+                stateRef.current.comingFromLeft = !comingFromLeft
+                stateRef.current.zIndexCounter++
+            }
+
+            gsap.delayedCall(PAUSE_DURATION, dealCard)
         }
 
-        // 3. Animate to Center (Straighten Out)
-        // It lands at rotation ~0 (straight)
-        gsap.to(el, {
-            x: 0,
-            y: 0,
-            rotation: (Math.random() * 4) - 2, // Lands almost straight (-2 to 2 deg)
-            scale: 1,
-            duration: MOBILE_FLY_DURATION,
-            ease: "back.out(1.0)" // Smooth landing with slight overshoot
-        })
-
-        // 4. Garbage Collection
-        if (pileIndex > 5) {
-            const bottomPoolIdx = (pileIndex - 5) % POOL_SIZE
-            const safeIdx = bottomPoolIdx < 0 ? bottomPoolIdx + POOL_SIZE : bottomPoolIdx
-            gsap.set(poolRef.current[safeIdx], { display: 'none' })
-        }
-
-        // 5. Update State
-        stateRef.current.globalIndex++
-        stateRef.current.comingFromLeft = !comingFromLeft
-        stateRef.current.zIndexCounter++
-        stateRef.current.pileIndex++
-
-        gsap.delayedCall(PAUSE_DURATION, dealCard)
-      }
-
-      gsap.delayedCall(0.5, dealCard)
+        gsap.delayedCall(0.5, dealCard)
 
     }, containerRef)
     return () => ctx.revert()
   }, [])
 
-  // Static Stack Styles (Tilted permanently to look like a source pile)
+  // Static Stack Styles
   const backingStackStyle = (isLeft: boolean): React.CSSProperties => ({
       position: 'absolute',
       left: '50%',
@@ -269,27 +297,28 @@ const MobileCarouselGSAP = () => {
       height: MOBILE_CARD_H,
       marginLeft: -MOBILE_CARD_W / 2,
       marginTop: -MOBILE_CARD_H / 2,
-      // Source piles stay tilted
       transform: `translateX(${isLeft ? '-170px' : '170px'}) rotate(${isLeft ? '-6deg' : '6deg'}) scale(0.9)`,
       zIndex: 10,
       pointerEvents: 'none',
-      filter: 'brightness(0.6)'
+      // No filter: brightness - it kills performance. Use opacity instead.
+      opacity: 0.6 
   })
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', width: '100%', height: 350, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    // touch-action: pan-y is CRITICAL for scroll performance
+    <div ref={containerRef} style={{ position: 'relative', width: '100%', height: 350, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'pan-y' }}>
       
       {/* STATIC LEFT STACK */}
       <div ref={leftStackRef} style={backingStackStyle(true)}>
-         <CardImageContent imageUrl={ALL_IMAGES[0]} isMobile={true} />
+         <CardImageContent imageUrl={ALL_IMAGES[2]} isMobile={true} />
       </div>
 
       {/* STATIC RIGHT STACK */}
       <div ref={rightStackRef} style={backingStackStyle(false)}>
-         <CardImageContent imageUrl={ALL_IMAGES[1]} isMobile={true} />
+         <CardImageContent imageUrl={ALL_IMAGES[3]} isMobile={true} />
       </div>
 
-      {/* DYNAMIC CENTER POOL */}
+      {/* DYNAMIC CENTER PILE */}
       {Array.from({ length: 20 }).map((_, i) => (
         <div 
           key={i}
@@ -298,9 +327,9 @@ const MobileCarouselGSAP = () => {
             position: 'absolute',
             width: MOBILE_CARD_W,
             height: MOBILE_CARD_H,
-            willChange: 'transform',
-            display: 'none',
-            transform: 'translateZ(0)'
+            willChange: 'transform', // Hint browser to optimize
+            display: 'none', 
+            transform: 'translateZ(0)' // Force GPU layer
           }}
         >
           <CardImageContent imageUrl={ALL_IMAGES[0]} isMobile={true} />
@@ -498,6 +527,10 @@ export default function Scene4({ className = '' }: { className?: string }) {
   useEffect(() => {
     if (isMobile) return // Native scroll for mobile
     
+    // Explicitly check for matchMedia to be extra safe against hydration
+    const mm = window.matchMedia('(min-width: 768px)')
+    if (!mm.matches) return
+
     const lenis = new Lenis({
       duration: 1.2,
       easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
