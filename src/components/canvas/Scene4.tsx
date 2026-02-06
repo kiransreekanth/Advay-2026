@@ -7,7 +7,7 @@ import BoundaryFrame from '@/components/ui/BoundaryFrame'
 import { COLORS } from '@/lib/constants'
 
 // ============================================
-// 1. GLOBAL CONSTANTS (Top Level)
+// 1. GLOBAL CONSTANTS
 // ============================================
 
 const FONTS = {
@@ -48,15 +48,14 @@ const DESKTOP_HEIGHT = 300
 const DESKTOP_SPACING = 160
 const VISIBLE_CARDS_DESKTOP = 6
 
-const MOBILE_CARD_W = 220
-const MOBILE_CARD_H = 320
+// Mobile Dimensions
+const MOBILE_CARD_W = 140
+const MOBILE_CARD_H = 210
+const MOBILE_GAP = 20
 
-// ANIMATION TIMINGS
-const PAUSE_DURATION = 1.0 
+// Animation Timing
 const SHIFT_DURATION = 0.5 
-// Mobile specific timings
-const MOBILE_ARC_DURATION = 0.7 
-const MOBILE_INTERVAL = 0.2 // Short pause between deals
+const PAUSE_DURATION = 1.0
 
 const CARD_OVERLAYS = [
   'rgba(229, 9, 20, 0.12)', 'rgba(178, 7, 16, 0.15)', 'rgba(113, 121, 126, 0.12)',
@@ -69,6 +68,7 @@ const CARD_OVERLAYS = [
 
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(false)
+  
   useLayoutEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768)
     check()
@@ -83,29 +83,18 @@ function useIsMobile() {
       clearTimeout(timeoutId)
     }
   }, [])
+  
   return isMobile
 }
 
 function useImagePreloader(images: string[]) {
-  const [isReady, setIsReady] = useState(false)
   useEffect(() => {
-    let count = 0
-    const target = 6
-    const check = () => {
-      count++
-      if (count >= target) setIsReady(true)
-    }
-    images.slice(0, target).forEach((src) => {
+    images.forEach((src) => {
       const img = new Image()
       img.src = src
-      if (img.complete) check()
-      else {
-        img.onload = check
-        img.onerror = check
-      }
+      if (img.decode) img.decode().catch(() => {}) 
     })
   }, [images])
-  return isReady
 }
 
 // ============================================
@@ -113,19 +102,17 @@ function useImagePreloader(images: string[]) {
 // ============================================
 
 const CardImageContent = React.memo(({ imageUrl, overlayColor, isMobile = false }: { imageUrl?: string, overlayColor?: string, isMobile?: boolean }) => {
-  const safeSrc = imageUrl || ALL_IMAGES[0]
+  const safeSrc = imageUrl && imageUrl.length > 0 ? imageUrl : ALL_IMAGES[0]
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', transformStyle: 'preserve-3d' }}>
       <div className="card-shadow" style={{
         position: 'absolute',
-        inset: isMobile ? '6px' : '0',
+        inset: isMobile ? '0' : '0',
         borderRadius: '12px',
         backgroundColor: '#000',
-        boxShadow: isMobile ? `0 10px 30px rgba(0,0,0,0.6)` : '0 8px 16px rgba(0,0,0,0.4)',
-        opacity: 1,
+        boxShadow: isMobile ? `0 2px 8px rgba(0,0,0,0.6)` : '0 8px 16px rgba(0,0,0,0.4)',
         transform: 'translateZ(-1px)',
-        transition: 'box-shadow 0.4s ease'
       }} />
       <div className="card-image" style={{
         position: 'absolute',
@@ -153,179 +140,99 @@ CardImageContent.displayName = 'CardImageContent'
 
 
 // ============================================
-// 4. MOBILE CAROUSEL ("Gravity Arc Deal")
+// 4. MOBILE CAROUSEL (Tilted 3D Ring)
 // ============================================
 
-const MobileCarouselGSAP = ({ isReady }: { isReady: boolean }) => {
+const MobileCarouselGSAP = () => {
   const containerRef = useRef<HTMLDivElement>(null)
+  const spinnerRef = useRef<HTMLDivElement>(null)
   
-  // Minimal DOM: Center + 2 Flyers (Left/Right)
-  const centerPileRef = useRef<HTMLDivElement>(null)
-  const leftFlyerRef = useRef<HTMLDivElement>(null)
-  const rightFlyerRef = useRef<HTMLDivElement>(null)
+  // 1. Math for the Circle
+  const numCards = ALL_IMAGES.length
+  // r = (width + gap) / (2 * tan(PI/n))
+  const radius = Math.round( (MOBILE_CARD_W + MOBILE_GAP) / (2 * Math.tan(Math.PI / numCards)) )
   
-  const stateRef = useRef({
-    currentIdx: 0,
-    nextIdx: 1,
-    zIndex: 100
-  })
-
   useLayoutEffect(() => {
-    if (!isReady) return
-
     const ctx = gsap.context(() => {
-        
-        // 1. SETUP
-        if(centerPileRef.current) (centerPileRef.current.querySelector('.content-img') as HTMLImageElement).src = ALL_IMAGES[0]
-        
-        // Hide Flyers
-        gsap.set([leftFlyerRef.current, rightFlyerRef.current], { display: 'none' })
-        
-        stateRef.current.nextIdx = 1
-
-        // 2. TIMELINE: The Gravity Arc
-        const tl = gsap.timeline({ repeat: -1 })
-
-        // --- SEQUENCE A: LEFT ARC (Falls from Top-Left) ---
-        tl.call(() => {
-             const { nextIdx, zIndex } = stateRef.current
-             const flyer = leftFlyerRef.current
-             if(flyer) {
-                 (flyer.querySelector('.content-img') as HTMLImageElement).src = ALL_IMAGES[nextIdx % ALL_IMAGES.length]
-                 
-                 // START: Top Left, Tilted
-                 gsap.set(flyer, { 
-                     display: 'block', 
-                     x: -180, 
-                     y: -200, // High up
-                     rotation: -35, // Tilted left
-                     scale: 0.8,
-                     opacity: 0,
-                     zIndex: zIndex 
-                 })
-             }
-             stateRef.current.zIndex++
-          })
-          // The Arc Motion
-          .to(leftFlyerRef.current, {
-             opacity: 1, duration: 0.2
-          }, "leftArc") // Fade in quickly
-          .to(leftFlyerRef.current, {
-             x: 0,
-             duration: MOBILE_ARC_DURATION,
-             ease: "power2.out" // Decelerate horizontally
-          }, "leftArc")
-          .to(leftFlyerRef.current, {
-             y: 0,
-             duration: MOBILE_ARC_DURATION,
-             ease: "bounce.out" // Gravity bounce vertically
-          }, "leftArc")
-          .to(leftFlyerRef.current, {
-             rotation: (Math.random() * 4) - 2, // Land straight
-             scale: 1,
-             duration: MOBILE_ARC_DURATION,
-             ease: "power1.out"
-          }, "leftArc")
-          
-          .call(() => {
-             // Commit
-             const src = (leftFlyerRef.current?.querySelector('.content-img') as HTMLImageElement)?.src
-             if(centerPileRef.current && src) (centerPileRef.current.querySelector('.content-img') as HTMLImageElement).src = src
-             gsap.set(leftFlyerRef.current, { display: 'none' })
-             stateRef.current.nextIdx++
-          })
-          
-          .to({}, { duration: MOBILE_INTERVAL })
-
-
-        // --- SEQUENCE B: RIGHT ARC (Falls from Top-Right) ---
-        .call(() => {
-             const { nextIdx, zIndex } = stateRef.current
-             const flyer = rightFlyerRef.current
-             if(flyer) {
-                 (flyer.querySelector('.content-img') as HTMLImageElement).src = ALL_IMAGES[nextIdx % ALL_IMAGES.length]
-                 
-                 // START: Top Right, Tilted
-                 gsap.set(flyer, { 
-                     display: 'block', 
-                     x: 180, 
-                     y: -200, 
-                     rotation: 35, 
-                     scale: 0.8,
-                     opacity: 0,
-                     zIndex: zIndex 
-                 })
-             }
-             stateRef.current.zIndex++
-          })
-          // The Arc Motion
-          .to(rightFlyerRef.current, {
-             opacity: 1, duration: 0.2
-          }, "rightArc")
-          .to(rightFlyerRef.current, {
-             x: 0,
-             duration: MOBILE_ARC_DURATION,
-             ease: "power2.out"
-          }, "rightArc")
-          .to(rightFlyerRef.current, {
-             y: 0,
-             duration: MOBILE_ARC_DURATION,
-             ease: "bounce.out"
-          }, "rightArc")
-          .to(rightFlyerRef.current, {
-             rotation: (Math.random() * 4) - 2,
-             scale: 1,
-             duration: MOBILE_ARC_DURATION,
-             ease: "power1.out"
-          }, "rightArc")
-          
-          .call(() => {
-             const src = (rightFlyerRef.current?.querySelector('.content-img') as HTMLImageElement)?.src
-             if(centerPileRef.current && src) (centerPileRef.current.querySelector('.content-img') as HTMLImageElement).src = src
-             gsap.set(rightFlyerRef.current, { display: 'none' })
-             stateRef.current.nextIdx++
-          })
-          
-          .to({}, { duration: MOBILE_INTERVAL })
-
+        // Spin the ring continuously
+        gsap.to(spinnerRef.current, {
+            rotationY: -360,
+            duration: 50, 
+            ease: "none",
+            repeat: -1
+        })
     }, containerRef)
     return () => ctx.revert()
-  }, [isReady])
-
-  const cardStyle: React.CSSProperties = {
-      position: 'absolute',
-      left: '50%',
-      top: '50%',
-      width: MOBILE_CARD_W,
-      height: MOBILE_CARD_H,
-      marginLeft: -MOBILE_CARD_W / 2,
-      marginTop: -MOBILE_CARD_H / 2,
-      willChange: 'transform',
-      transform: 'translateZ(0)',
-  }
+  }, [radius])
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', width: '100%', height: 350, overflow: 'hidden', touchAction: 'pan-y' }}>
-      
-      {/* 1. Center Pile (Anchor) */}
-      <div ref={centerPileRef} style={{ ...cardStyle, zIndex: 10 }}>
-         <CardImageContent imageUrl={ALL_IMAGES[0]} isMobile={true} />
-      </div>
-
-      {/* 2. Flyers (Left & Right) */}
-      <div ref={leftFlyerRef} style={{ ...cardStyle, display: 'none', zIndex: 20 }}>
-         <CardImageContent imageUrl={ALL_IMAGES[0]} isMobile={true} />
-      </div>
-      <div ref={rightFlyerRef} style={{ ...cardStyle, display: 'none', zIndex: 20 }}>
-         <CardImageContent imageUrl={ALL_IMAGES[0]} isMobile={true} />
-      </div>
-
+    <div 
+      ref={containerRef} 
+      style={{ 
+        position: 'relative', 
+        width: '100%', 
+        // Increased height to prevent reflection clipping and accommodate tilt
+        height: '600px', 
+        perspective: '1200px', 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center', 
+        overflow: 'hidden', 
+        marginTop: '-50px' // Pull up slightly to center vertically in viewport
+      }}
+    >
+        {/* SCENE WRAPPER */}
+        <div 
+            style={{
+                position: 'relative',
+                width: MOBILE_CARD_W,
+                height: MOBILE_CARD_H,
+                transformStyle: 'preserve-3d',
+                // TILT ADJUSTMENT:
+                // rotateX(-15deg) makes the "back" of the ring rise up,
+                // making it visible behind the front cards.
+                transform: `translateZ(-${radius}px) rotateX(-15deg)`,
+            }}
+        >
+            {/* SPINNER */}
+            <div 
+                ref={spinnerRef}
+                style={{
+                    position: 'absolute',
+                    inset: 0,
+                    transformStyle: 'preserve-3d',
+                }}
+            >
+                {ALL_IMAGES.map((src, i) => (
+                    <div 
+                        key={i}
+                        style={{
+                            position: 'absolute',
+                            left: 0,
+                            top: 0,
+                            width: '100%',
+                            height: '100%',
+                            // Position in circle
+                            transform: `rotateY(${i * (360 / numCards)}deg) translateZ(${radius}px)`,
+                            // IMPORTANT: visible backface allows seeing cards on the rear arc
+                            backfaceVisibility: 'visible', 
+                            // REFLECTION FIX:
+                            // Extended the gradient stop to 50% to show full reflection
+                            // Added bottom padding via box-reflect offset (below 4px)
+                            WebkitBoxReflect: 'below 4px linear-gradient(transparent, transparent 20%, rgba(0,0,0,0.4))'
+                        }}
+                    >
+                        <CardImageContent imageUrl={src} isMobile={true} />
+                    </div>
+                ))}
+            </div>
+        </div>
     </div>
   )
 }
 
 // ============================================
-// 5. DESKTOP CAROUSEL (Unchanged)
+// 5. DESKTOP CAROUSEL
 // ============================================
 
 const DesktopGalleryCard = React.memo(({
@@ -357,7 +264,6 @@ const DesktopGalleryCard = React.memo(({
   const scale = 1.1 - (normalizedPos * 0.25)
   const zIndex = position === 0 ? 120 : Math.round(100 - position * 10)
   const translateZ = 50 - normalizedPos * 100
-  const isCenter = position < 1.5
   const overlayColor = CARD_OVERLAYS[imageIndex % CARD_OVERLAYS.length]
 
   return (
@@ -429,11 +335,11 @@ const DesktopCarouselGSAP = () => {
 
                 nodes.forEach((node, idx) => {
                     if (idx === nextIdx) {
-                         gsap.to(node, { scale: startStyle.scale, opacity: 1, duration: SHIFT_DURATION, ease: "back.out(1.2)" })
-                         const borderEl = node.querySelector('.card-image')
-                         const shadowEl = node.querySelector('.card-shadow')
-                         if(borderEl) gsap.to(borderEl, { borderColor: `${COLORS.red}25`, duration: SHIFT_DURATION })
-                         if(shadowEl) gsap.to(shadowEl, { boxShadow: `0 25px 50px rgba(0,0,0,0.5), 0 0 40px ${COLORS.red}20`, duration: SHIFT_DURATION })
+                          gsap.to(node, { scale: startStyle.scale, opacity: 1, duration: SHIFT_DURATION, ease: "back.out(1.2)" })
+                          const borderEl = node.querySelector('.card-image')
+                          const shadowEl = node.querySelector('.card-shadow')
+                          if(borderEl) gsap.to(borderEl, { borderColor: `${COLORS.red}25`, duration: SHIFT_DURATION })
+                          if(shadowEl) gsap.to(shadowEl, { boxShadow: `0 25px 50px rgba(0,0,0,0.5), 0 0 40px ${COLORS.red}20`, duration: SHIFT_DURATION })
                     } else if (positions[idx] !== 100) {
                         positions[idx] += 1
                         if (positions[idx] > VISIBLE_CARDS_DESKTOP) {
@@ -506,7 +412,7 @@ const DesktopCarouselGSAP = () => {
 
 export default function Scene4({ className = '' }: { className?: string }) {
   const isMobile = useIsMobile()
-  const imagesLoaded = useImagePreloader(ALL_IMAGES)
+  useImagePreloader(ALL_IMAGES)
 
   // OPTIMIZATION: Lenis Scroll (Desktop Only)
   useEffect(() => {
@@ -550,8 +456,7 @@ export default function Scene4({ className = '' }: { className?: string }) {
         </div>
 
         <div style={{ position: 'absolute', top: '50%', left: 0, right: 0, transform: 'translateY(-50%)' }}>
-          {/* Ensure animation only starts when assets are ready */}
-          <MobileCarouselGSAP isReady={imagesLoaded} />
+          <MobileCarouselGSAP />
         </div>
 
         <div style={{ position: 'absolute', bottom: '40px', left: '24px', right: '24px', zIndex: 1 }}>
