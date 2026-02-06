@@ -1,0 +1,157 @@
+/* ============================================
+   ADVAY 2026 - Global Styles
+   Tailwind CSS v4 + Advay Color Palette
+   ============================================ */
+
+@import "tailwindcss";
+
+/* ============================================
+   CSS CUSTOM PROPERTIES
+   ============================================ */
+
+:root {
+  /* Advay Color Palette */
+  --advay-bg: #0D0D0D;
+  --advay-text: #E5E4E2;
+  --advay-text-muted: #71797E;
+  --advay-red: #E50914;
+  --advay-red-dark: #B20710;
+  
+  /* Glass Effect */
+  --glass-bg: rgba(13, 13, 13, 0.7);
+  --glass-border: rgba(229, 228, 226, 0.1);
+  
+  /* Page Margins (KPR Verse style) */
+  --margin-mobile: 16px;
+  --margin-tablet: 32px;
+  --margin-desktop: 48px;
+}
+
+/* ============================================
+   BASE RESET
+   ============================================ */
+
+ *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  background-color: var(--advay-bg);
+  color: var(--advay-text);
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  line-height: 1.5;
+}
+
+/* ============================================
+   LENIS SMOOTH SCROLL
+   ============================================ */
+
+html.lenis, html.lenis body {
+  height: auto;
+}
+
+html, body {
+  overflow-x: clip;
+}
+
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+
+/* ============================================
+   SELECTION
+   ============================================ */
+
+::selection {
+  background-color: var(--advay-red);
+  color: var(--advay-text);
+}
+
+/* ============================================
+   SCROLLBAR (Hidden but functional)
+   ============================================ */
+
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* ============================================
+   FOCUS STATES
+   ============================================ */
+
+:focus-visible {
+  outline: 2px solid var(--advay-red);
+  outline-offset: 2px;
+}
+
+/* ============================================
+   UTILITY CLASSES
+   ============================================ */
+
+.page-padding {
+  padding-left: var(--margin-mobile);
+  padding-right: var(--margin-mobile);
+}
+
+@media (min-width: 768px) {
+  .page-padding {
+    padding-left: var(--margin-tablet);
+    padding-right: var(--margin-tablet);
+  }
+}
+
+@media (min-width: 1024px) {
+  .page-padding {
+    padding-left: var(--margin-desktop);
+    padding-right: var(--margin-desktop);
+  }
+}
+
+.full-screen {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* Glass Card */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--glass-border);
+}
+
+/* Red Glow */
+.glow-red {
+  box-shadow: 0 0 20px rgba(229, 9, 20, 0.3);
+}
+
+/* Text Colors */
+.text-advay { color: var(--advay-text); }
+.text-muted { color: var(--advay-text-muted); }
+.text-red { color: var(--advay-red); }
+
+/* Pulse Animation */
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(229, 9, 20, 0.3); }
+  50% { box-shadow: 0 0 35px rgba(229, 9, 20, 0.5); }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
