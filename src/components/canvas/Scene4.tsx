@@ -49,12 +49,11 @@ const VISIBLE_CARDS_DESKTOP = 6
 
 const MOBILE_CARD_W = 220
 const MOBILE_CARD_H = 320
-const MOBILE_GAP = 55
 
-// Animation Settings
+// ANIMATION SETTINGS
 const PAUSE_DURATION = 1.0 
-const FLY_DURATION = 0.6 
-const SHIFT_DURATION = 0.5 // For desktop compatibility
+const MOBILE_FLY_DURATION = 0.7 // Duration of the "deal"
+const SHIFT_DURATION = 0.5 // For desktop
 
 const CARD_OVERLAYS = [
   'rgba(229, 9, 20, 0.12)', 'rgba(178, 7, 16, 0.15)', 'rgba(113, 121, 126, 0.12)',
@@ -76,7 +75,6 @@ function useIsMobile() {
   return isMobile
 }
 
-// Preload images to prevent frame drops
 function useImagePreloader(images: string[]) {
   useEffect(() => {
     images.forEach((src) => {
@@ -98,7 +96,6 @@ const CardImageContent = React.memo(({ imageUrl, overlayColor, isMobile = false 
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', transformStyle: 'preserve-3d' }}>
-      {/* SHADOW LAYER */}
       <div className="card-shadow" style={{
         position: 'absolute',
         inset: isMobile ? '6px' : '0',
@@ -109,8 +106,6 @@ const CardImageContent = React.memo(({ imageUrl, overlayColor, isMobile = false 
         transform: 'translateZ(-1px)',
         transition: 'box-shadow 0.4s ease'
       }} />
-
-      {/* IMAGE LAYER */}
       <div className="card-image" style={{
         position: 'absolute',
         inset: 0,
@@ -137,190 +132,164 @@ CardImageContent.displayName = 'CardImageContent'
 
 
 // ============================================
-// MOBILE CAROUSEL (Extreme Edges -> Center Logic)
+// MOBILE CAROUSEL (Tilted Dealer Logic)
 // ============================================
 
 const MobileCarouselGSAP = () => {
   const containerRef = useRef<HTMLDivElement>(null)
   
-  // POOL: For the cards that fly into the center
-  const POOL_SIZE = 20
+  // 1. Moving Pool (The cards that fly)
+  const POOL_SIZE = 15
   const poolRef = useRef<HTMLDivElement[]>([])
   
-  // STATIC REFS: The visible "Background" cards that stay in place
-  const leftFarRef = useRef<HTMLDivElement>(null)  // Extreme Left (-2)
-  const leftNearRef = useRef<HTMLDivElement>(null) // Inner Left (-1)
-  const rightNearRef = useRef<HTMLDivElement>(null)// Inner Right (1)
-  const rightFarRef = useRef<HTMLDivElement>(null) // Extreme Right (2)
+  // 2. Static Backing Stacks (Visible piles at edges)
+  const leftStackRef = useRef<HTMLDivElement>(null)
+  const rightStackRef = useRef<HTMLDivElement>(null)
   
-  // STATE: Track logical indices
+  // Logic State
   const stateRef = useRef({
-    centerPileIndices: [] as number[], // Track pool nodes currently in center
-    globalImageIndex: 0, // Master counter for images
+    globalIndex: 0,
+    pileIndex: 0,
     comingFromLeft: true,
     zIndexCounter: 200
   })
 
   useLayoutEffect(() => {
     const ctx = gsap.context(() => {
-        
-        // --- 1. SETUP STATIC BACKGROUNDS ---
-        // These cards are purely decorative "sources". They never move X/Y.
-        // We just swap their images to make it look like an infinite deck.
-        
-        // Initialize them with offset images
-        if(leftFarRef.current) (leftFarRef.current.querySelector('.content-img') as HTMLImageElement).src = ALL_IMAGES[2]
-        if(leftNearRef.current) (leftNearRef.current.querySelector('.content-img') as HTMLImageElement).src = ALL_IMAGES[1]
-        if(rightNearRef.current) (rightNearRef.current.querySelector('.content-img') as HTMLImageElement).src = ALL_IMAGES[3]
-        if(rightFarRef.current) (rightFarRef.current.querySelector('.content-img') as HTMLImageElement).src = ALL_IMAGES[4]
+      
+      // --- SETUP ---
+      poolRef.current.forEach(el => gsap.set(el, { display: 'none' }))
+      
+      // Setup Source Stacks with initial images
+      if (leftStackRef.current) {
+          const img = leftStackRef.current.querySelector('.content-img') as HTMLImageElement
+          if(img) img.src = ALL_IMAGES[2] 
+      }
+      if (rightStackRef.current) {
+          const img = rightStackRef.current.querySelector('.content-img') as HTMLImageElement
+          if(img) img.src = ALL_IMAGES[3]
+      }
 
-        // --- 2. INITIALIZE CENTER PILE ---
-        // Hide all pool nodes
-        poolRef.current.forEach(el => gsap.set(el, { display: 'none' }))
+      // Initialize Center with 1 straight card
+      const firstEl = poolRef.current[0]
+      const firstImg = firstEl.querySelector('.content-img') as HTMLImageElement
+      if(firstImg) firstImg.src = ALL_IMAGES[0]
+      gsap.set(firstEl, { display: 'block', x: 0, rotation: 0, scale: 1, zIndex: 100 })
+      
+      stateRef.current.globalIndex = 4 
+      stateRef.current.pileIndex = 1
+
+      // --- ANIMATION LOOP ---
+      const dealCard = () => {
+        const { globalIndex, comingFromLeft, zIndexCounter, pileIndex } = stateRef.current
         
-        // Place first card in center
-        const firstEl = poolRef.current[0]
-        const firstImg = firstEl.querySelector('.content-img') as HTMLImageElement
-        firstImg.src = ALL_IMAGES[0]
+        // A. Get Next Moving Card Node
+        const poolIndex = pileIndex % POOL_SIZE
+        const el = poolRef.current[poolIndex]
         
-        gsap.set(firstEl, { 
-            display: 'block', x: 0, rotation: 0, scale: 1, zIndex: 100 
+        // B. Logic for Tilt & Position
+        const extremeX = 180 // Start further out
+        const startX = comingFromLeft ? -extremeX : extremeX
+        
+        // TILT LOGIC:
+        // Left entry: Tilt LEFT (-15deg)
+        // Right entry: Tilt RIGHT (+15deg)
+        const startRot = comingFromLeft ? -15 : 15
+        
+        const currentImgUrl = ALL_IMAGES[globalIndex % ALL_IMAGES.length]
+        const nextStackImgUrl = ALL_IMAGES[(globalIndex + 2) % ALL_IMAGES.length]
+
+        // 1. Prepare Moving Card
+        const imgEl = el.querySelector('.content-img') as HTMLImageElement
+        if(imgEl) imgEl.src = currentImgUrl
+        
+        // Set Initial State (Tilted)
+        gsap.set(el, {
+            display: 'block',
+            x: startX,
+            y: 0,
+            rotation: startRot, // Start tilted
+            scale: 0.9,
+            zIndex: zIndexCounter,
+            opacity: 1
         })
-        
-        stateRef.current.centerPileIndices.push(0)
-        stateRef.current.globalImageIndex = 5 // Start dealing from index 5
-        stateRef.current.zIndexCounter = 101
 
-        // --- 3. ANIMATION CYCLE ---
-        const dealCard = () => {
-            const { centerPileIndices, globalImageIndex, comingFromLeft, zIndexCounter } = stateRef.current
+        // 2. Update Source Stack (Instant swap underneath)
+        const stackToUpdate = comingFromLeft ? leftStackRef.current : rightStackRef.current
+        if (stackToUpdate) {
+            const stackImg = stackToUpdate.querySelector('.content-img') as HTMLImageElement
+            if(stackImg) stackImg.src = nextStackImgUrl
             
-            // A. FIND FREE POOL NODE
-            let nodeToUseIdx = -1
-            
-            // Try to find unused node
-            for(let i=0; i<POOL_SIZE; i++) {
-                if(!centerPileIndices.includes(i)) {
-                    nodeToUseIdx = i
-                    break
-                }
-            }
-            
-            // If full (pile too high), recycle bottom-most card
-            if (nodeToUseIdx === -1 || centerPileIndices.length > 8) {
-                const bottomIdx = centerPileIndices.shift() 
-                if (bottomIdx !== undefined) {
-                    // Hide the recycled card immediately (it's covered)
-                    gsap.set(poolRef.current[bottomIdx], { display: 'none' })
-                    if (nodeToUseIdx === -1) nodeToUseIdx = bottomIdx
-                }
-            }
-
-            if (nodeToUseIdx !== -1) {
-                const el = poolRef.current[nodeToUseIdx]
-                const activeSourceRef = comingFromLeft ? leftFarRef : rightFarRef
-                
-                // Get Images
-                const movingImgUrl = (activeSourceRef.current?.querySelector('.content-img') as HTMLImageElement)?.src || ALL_IMAGES[0]
-                const nextSourceImgUrl = ALL_IMAGES[globalImageIndex % ALL_IMAGES.length]
-                
-                // 1. Setup Moving Card
-                const imgEl = el.querySelector('.content-img') as HTMLImageElement
-                if(imgEl) imgEl.src = movingImgUrl
-                
-                // Determine Start Position (Match the static card's visual position)
-                // Left Far is at -90px, Right Far is at 90px (approx)
-                const startX = comingFromLeft ? -90 : 90
-                const startRot = comingFromLeft ? -6 : 6
-                
-                gsap.set(el, {
-                    display: 'block',
-                    x: startX,
-                    rotation: startRot,
-                    scale: 0.9,
-                    zIndex: zIndexCounter,
-                    opacity: 1
-                })
-                
-                // 2. Animate to Center
-                gsap.to(el, {
-                    x: 0,
-                    rotation: (Math.random() * 4) - 2, // Slight randomness
-                    scale: 1,
-                    duration: FLY_DURATION,
-                    ease: "back.out(1.2)"
-                })
-                
-                // 3. INSTANTLY Update Source Stack
-                // This creates the illusion that the card left the stack and revealed a new one underneath
-                if (activeSourceRef.current) {
-                    const sourceImg = activeSourceRef.current.querySelector('.content-img') as HTMLImageElement
-                    if(sourceImg) sourceImg.src = nextSourceImgUrl
-                    
-                    // Small "pop" animation on the source stack to sell the effect
-                    gsap.fromTo(activeSourceRef.current,
-                        { scale: 0.85, opacity: 0.8 },
-                        { scale: 0.9, opacity: 1, duration: 0.3, ease: "power2.out" }
-                    )
-                }
-
-                // Update State
-                centerPileIndices.push(nodeToUseIdx)
-                stateRef.current.globalImageIndex++
-                stateRef.current.comingFromLeft = !comingFromLeft
-                stateRef.current.zIndexCounter++
-            }
-
-            // Recursion
-            gsap.delayedCall(PAUSE_DURATION, dealCard)
+            // Visual "Pop" to show a card left the stack
+            gsap.fromTo(stackToUpdate, 
+                { scale: 0.85 }, 
+                { scale: 0.9, duration: 0.3, ease: "back.out(1.5)" }
+            )
         }
 
-        // Start Loop
-        gsap.delayedCall(0.5, dealCard)
+        // 3. Animate to Center (Straighten Out)
+        // It lands at rotation ~0 (straight)
+        gsap.to(el, {
+            x: 0,
+            y: 0,
+            rotation: (Math.random() * 4) - 2, // Lands almost straight (-2 to 2 deg)
+            scale: 1,
+            duration: MOBILE_FLY_DURATION,
+            ease: "back.out(1.0)" // Smooth landing with slight overshoot
+        })
+
+        // 4. Garbage Collection
+        if (pileIndex > 5) {
+            const bottomPoolIdx = (pileIndex - 5) % POOL_SIZE
+            const safeIdx = bottomPoolIdx < 0 ? bottomPoolIdx + POOL_SIZE : bottomPoolIdx
+            gsap.set(poolRef.current[safeIdx], { display: 'none' })
+        }
+
+        // 5. Update State
+        stateRef.current.globalIndex++
+        stateRef.current.comingFromLeft = !comingFromLeft
+        stateRef.current.zIndexCounter++
+        stateRef.current.pileIndex++
+
+        gsap.delayedCall(PAUSE_DURATION, dealCard)
+      }
+
+      gsap.delayedCall(0.5, dealCard)
 
     }, containerRef)
     return () => ctx.revert()
   }, [])
 
-  // HELPER: Styles for the static cards
-  const getStaticStyle = (posIndex: number): React.CSSProperties => {
-      // Positions: -2 (Far Left), -1 (Near Left), 1 (Near Right), 2 (Far Right)
-      const x = posIndex * 45 // 45px spacing: -90, -45, 45, 90
-      const rot = posIndex * 3 // -6, -3, 3, 6 deg
-      
-      return {
-          position: 'absolute',
-          left: '50%',
-          top: '50%',
-          width: MOBILE_CARD_W,
-          height: MOBILE_CARD_H,
-          marginLeft: -MOBILE_CARD_W / 2,
-          marginTop: -MOBILE_CARD_H / 2,
-          transform: `translateX(${x}px) rotate(${rot}deg) scale(0.9)`,
-          zIndex: 10 - Math.abs(posIndex), // Lower Z-index than center pile
-          filter: 'brightness(0.8)', // Slightly darker to indicate background
-          pointerEvents: 'none'
-      }
-  }
+  // Static Stack Styles (Tilted permanently to look like a source pile)
+  const backingStackStyle = (isLeft: boolean): React.CSSProperties => ({
+      position: 'absolute',
+      left: '50%',
+      top: '50%',
+      width: MOBILE_CARD_W,
+      height: MOBILE_CARD_H,
+      marginLeft: -MOBILE_CARD_W / 2,
+      marginTop: -MOBILE_CARD_H / 2,
+      // Source piles stay tilted
+      transform: `translateX(${isLeft ? '-170px' : '170px'}) rotate(${isLeft ? '-6deg' : '6deg'}) scale(0.9)`,
+      zIndex: 10,
+      pointerEvents: 'none',
+      filter: 'brightness(0.6)'
+  })
 
   return (
     <div ref={containerRef} style={{ position: 'relative', width: '100%', height: 350, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       
-      {/* STATIC HORIZONTAL STACK (Visual Only) */}
-      <div ref={leftFarRef} style={getStaticStyle(-2)}>
-         <CardImageContent imageUrl={ALL_IMAGES[2]} isMobile={true} />
-      </div>
-      <div ref={leftNearRef} style={getStaticStyle(-1)}>
-         <CardImageContent imageUrl={ALL_IMAGES[1]} isMobile={true} />
-      </div>
-      <div ref={rightNearRef} style={getStaticStyle(1)}>
-         <CardImageContent imageUrl={ALL_IMAGES[3]} isMobile={true} />
-      </div>
-      <div ref={rightFarRef} style={getStaticStyle(2)}>
-         <CardImageContent imageUrl={ALL_IMAGES[4]} isMobile={true} />
+      {/* STATIC LEFT STACK */}
+      <div ref={leftStackRef} style={backingStackStyle(true)}>
+         <CardImageContent imageUrl={ALL_IMAGES[0]} isMobile={true} />
       </div>
 
-      {/* DYNAMIC CENTER PILE (Destination) */}
+      {/* STATIC RIGHT STACK */}
+      <div ref={rightStackRef} style={backingStackStyle(false)}>
+         <CardImageContent imageUrl={ALL_IMAGES[1]} isMobile={true} />
+      </div>
+
+      {/* DYNAMIC CENTER POOL */}
       {Array.from({ length: 20 }).map((_, i) => (
         <div 
           key={i}
@@ -330,7 +299,7 @@ const MobileCarouselGSAP = () => {
             width: MOBILE_CARD_W,
             height: MOBILE_CARD_H,
             willChange: 'transform',
-            display: 'none', // Managed by GSAP
+            display: 'none',
             transform: 'translateZ(0)'
           }}
         >
